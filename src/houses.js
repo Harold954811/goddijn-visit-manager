@@ -5,14 +5,17 @@
 // separate deployments. Update both places together if a house is added,
 // renamed, or removed.
 //
-// Maison Principale (Castellas) and the Loveland "Maison Principale" house
-// are deliberately absent from this list. The family's own private
-// residence at Loveland must never be offered here at all -- see
-// memory://facts/loveland-maison-principale-is-private. (Loveland's
-// HIERARCHY entry in the guest-guide repo never listed it as a house for
-// the same reason; Castellas's "Maison Principale" is a real guest house
-// there and stays out of this app only because visit-based access has not
-// been extended to Castellas yet -- add it here once it is.)
+// The Loveland "Maison Principale" house is deliberately absent from this
+// list -- the family's own private residence there must never be offered
+// as a bookable house at all. See memory://facts/loveland-maison-principale-is-private.
+// Loveland's HIERARCHY entry in the guest-guide repo never listed it as a
+// house for the same reason.
+//
+// Castellas's "Maison Principale" is a DIFFERENT, real guest house (added
+// 2026-09-03) -- it was already live on the guest guide (present in
+// Goddijn-net-launchpad's lib/houses.js HIERARCHY, with its own
+// gd_content_sections rows) but missing from this booking form's house
+// list until now.
 
 export const PROPERTIES = [
   {
@@ -32,7 +35,10 @@ export const PROPERTIES = [
       {
         id: "castellas",
         name: "Castellas",
-        houses: [{ matchHouse: "Maison Invités (Castellas)", name: "Maison Invités" }],
+        houses: [
+          { matchHouse: "Maison Principale (Castellas)", name: "Maison Principale" },
+          { matchHouse: "Maison Invités (Castellas)", name: "Maison Invités" },
+        ],
       },
     ],
   },
