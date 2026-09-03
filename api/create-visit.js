@@ -192,6 +192,7 @@ async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, 
       from: `${safeCreatorName} <${RESEND_FROM_ADDRESS}>`,
       reply_to: creator.email,
       to: [guestEmail],
+      bcc: ["harold@goddijn.net", "corinne@goddijn.net"],
       subject: `You're invited to stay — ${houseName}`,
       html: `
         <p>Hi ${safeGuestName},</p>
