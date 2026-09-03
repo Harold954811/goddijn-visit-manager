@@ -115,6 +115,7 @@ function VisitForm({ session, onCreated }) {
   const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
+  const [doorCode, setDoorCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null); // { ok: true } | { ok: false, message }
 
@@ -129,7 +130,7 @@ function VisitForm({ session, onCreated }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ guestName, guestEmail, house, startDate, endDate, notes }),
+        body: JSON.stringify({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -137,6 +138,7 @@ function VisitForm({ session, onCreated }) {
       setGuestName("");
       setGuestEmail("");
       setNotes("");
+      setDoorCode("");
       onCreated?.();
     } catch (err) {
       setResult({ ok: false, message: err.message });
@@ -204,6 +206,21 @@ function VisitForm({ session, onCreated }) {
           Notes (optional, internal only)
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         </label>
+
+        <label>
+          Door code (optional)
+          <input
+            value={doorCode}
+            onChange={(e) => setDoorCode(e.target.value)}
+            placeholder="Leave blank until you've generated one in 2N Access Commander"
+            maxLength={50}
+          />
+        </label>
+        <p className="hint">
+          The 2N integration isn't automated yet — generate the code in 2N Access Commander yourself,
+          then paste it here. If you leave it blank, the invitation just won't mention a door code; you
+          can always add one later from the Edit screen.
+        </p>
 
         <button type="submit" disabled={submitting}>
           {submitting ? "Granting access…" : "Grant access & send invite"}
@@ -320,7 +337,10 @@ function VisitsList({ session, refreshKey }) {
                     <div>{v.guest_name}</div>
                     <div className="muted small">{v.guest_email}</div>
                   </td>
-                  <td>{HOUSE_NAME_BY_MATCH[v.house] || v.house}</td>
+                  <td>
+                    <div>{HOUSE_NAME_BY_MATCH[v.house] || v.house}</div>
+                    {v.door_code && <div className="muted small">Door code: {v.door_code}</div>}
+                  </td>
                   <td>{toDateInputValue(v.start_date)}</td>
                   <td>{toDateInputValue(v.end_date)}</td>
                   <td>
@@ -353,6 +373,7 @@ function EditRow({ visit, session, onDone, onCancel }) {
   const [startDate, setStartDate] = useState(toDateInputValue(visit.start_date));
   const [endDate, setEndDate] = useState(toDateInputValue(visit.end_date));
   const [status, setStatus] = useState(visit.status);
+  const [doorCode, setDoorCode] = useState(visit.door_code || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -374,6 +395,7 @@ function EditRow({ visit, session, onDone, onCancel }) {
           startDate,
           endDate,
           status,
+          doorCode,
         }),
       });
       const data = await res.json();
@@ -424,6 +446,10 @@ function EditRow({ visit, session, onDone, onCancel }) {
                 </option>
               ))}
             </select>
+          </label>
+          <label>
+            Door code (optional)
+            <input value={doorCode} onChange={(e) => setDoorCode(e.target.value)} maxLength={50} />
           </label>
         </div>
         {guestEmail !== visit.guest_email && (

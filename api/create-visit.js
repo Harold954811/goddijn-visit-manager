@@ -61,7 +61,7 @@ function escapeHtml(str) {
   })[c]);
 }
 
-function validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes }) {
+function validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }) {
   if (!guestName || typeof guestName !== "string" || guestName.length > 200) {
     return "Guest name is required (max 200 characters)";
   }
@@ -82,6 +82,9 @@ function validateVisitInput({ guestName, guestEmail, house, startDate, endDate, 
   }
   if (notes && (typeof notes !== "string" || notes.length > 2000)) {
     return "Notes must be text under 2000 characters";
+  }
+  if (doorCode && (typeof doorCode !== "string" || doorCode.length > 50)) {
+    return "Door code must be text under 50 characters";
   }
   return null;
 }
@@ -104,7 +107,7 @@ async function verifyCaller(authHeader) {
   };
 }
 
-async function createDirectusVisit({ guestName, guestEmail, house, startDate, endDate, notes }) {
+async function createDirectusVisit({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }) {
   const res = await fetch(`${DIRECTUS}/items/gd_visits`, {
     method: "POST",
     headers: {
@@ -120,6 +123,7 @@ async function createDirectusVisit({ guestName, guestEmail, house, startDate, en
       end_date: `${endDate}T23:59:59.000Z`,
       status: "Active",
       notes: notes || null,
+      door_code: doorCode || null,
     }),
   });
   if (!res.ok) {
@@ -178,10 +182,18 @@ async function addToCloudflareAllowlist(guestEmail) {
   }
 }
 
-async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, startDate, endDate }) {
+async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, startDate, endDate, doorCode }) {
   const safeCreatorName = escapeHtml(creator.name);
   const safeGuestName = escapeHtml(guestName || "there");
   const safeHouseName = escapeHtml(houseName);
+  // Door code is optional -- the 2N Access Commander integration isn't wired
+  // up yet (see memory://projects/unified-guest-access-2n-cloudflare), so
+  // Harold generates it manually in 2N and pastes it in here when he has
+  // one. Omit the paragraph entirely rather than show an empty/placeholder
+  // line when there isn't one yet.
+  const doorCodeHtml = doorCode
+    ? `<p>Your door code is <strong>${escapeHtml(doorCode)}</strong>.</p>`
+    : "";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -201,6 +213,7 @@ async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, 
         <p>When it's time, sign in at
         <a href="https://www.goddijn.net">www.goddijn.net</a> with this email address
         (${escapeHtml(guestEmail)}) to see arrival details, Wi-Fi, and everything else you'll need.</p>
+        ${doorCodeHtml}
         <p>See you soon,<br/>${safeCreatorName}</p>
       `,
     }),
@@ -235,8 +248,8 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { guestName, guestEmail, house, startDate, endDate, notes } = req.body || {};
-  const validationError = validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes });
+  const { guestName, guestEmail, house, startDate, endDate, notes, doorCode } = req.body || {};
+  const validationError = validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode });
   if (validationError) {
     res.status(400).json({ error: validationError });
     return;
@@ -245,7 +258,7 @@ export default async function handler(req, res) {
 
   try {
     const visit = await createDirectusVisit({
-      guestName, guestEmail: normalizedGuestEmail, house, startDate, endDate, notes,
+      guestName, guestEmail: normalizedGuestEmail, house, startDate, endDate, notes, doorCode,
     });
     await addToCloudflareAllowlist(normalizedGuestEmail);
     await sendInvitationEmail({
@@ -255,6 +268,7 @@ export default async function handler(req, res) {
       houseName: house,
       startDate,
       endDate,
+      doorCode,
     });
     await provisionDoorCode(visit);
     res.status(200).json({ ok: true, visitId: visit?.data?.id ?? null });

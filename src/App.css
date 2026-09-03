@@ -195,3 +195,4 @@ button.link {
 }
 .success { color: #5fd68b; margin-top: 16px; font-size: 0.9rem; }
 .error { color: #f27272; margin-top: 12px; font-size: 0.9rem; }
+.hint { color: #8d958f; font-size: 0.78rem; margin: -8px 0 14px; line-height: 1.4; }

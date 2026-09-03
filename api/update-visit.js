@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { id, guestName, guestEmail, house, startDate, endDate, notes, status } = req.body || {};
+  const { id, guestName, guestEmail, house, startDate, endDate, notes, status, doorCode } = req.body || {};
   if (id === undefined || id === null || id === "") {
     res.status(400).json({ error: "Missing visit id" });
     return;
@@ -102,6 +102,14 @@ export default async function handler(req, res) {
       return;
     }
     patch.status = status;
+  }
+
+  if (doorCode !== undefined) {
+    if (doorCode && (typeof doorCode !== "string" || doorCode.length > 50)) {
+      res.status(400).json({ error: "Door code must be text under 50 characters" });
+      return;
+    }
+    patch.door_code = doorCode || null;
   }
 
   if (Object.keys(patch).length === 0) {
