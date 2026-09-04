@@ -39,16 +39,23 @@ const CF_POLICY_ID = "213336b9-9a9f-4d12-a413-f9d59a0498cd";
 const RESEND_FROM_ADDRESS = "stay@goddijn.net";
 
 // Who may create a visit at all, independent of how they obtained a
-// Supabase session. Today only harold@ and corinne@ are assigned to the
-// Visit Manager Entra app (see memory://facts/goddijn-entra-id-tenant), so a
-// domain check is the right level of strictness: it fixes the real gap
-// (anyone with *any* Supabase session on this project could otherwise call
-// this endpoint) without inventing new infrastructure. If a trusted
-// non-@goddijn.net person ever needs to create visits themselves, extend
-// this the same deliberate way gd_trusted_emails replaced a hardcoded list
-// on the guide site -- don't just delete the check.
+// Supabase session. Today harold@ and corinne@ are assigned to the Visit
+// Manager Entra app (see memory://facts/goddijn-entra-id-tenant), so a
+// domain check is the right baseline: it fixes the real gap (anyone with
+// *any* Supabase session on this project could otherwise call this
+// endpoint) without inventing new infrastructure. TRUSTED_NON_FAMILY_EMAILS
+// (below, kept in sync with lib/auth.js's copy) is for a trusted
+// non-@goddijn.net person who's ALSO been explicitly Entra-assigned --
+// being assigned gets someone past sign-in, this list is the separate gate
+// that decides what the app then lets them do. If this grows past a
+// handful of people, move it to Directus the same deliberate way
+// gd_trusted_emails replaced a hardcoded list on the guide site.
+const TRUSTED_NON_FAMILY_EMAILS = new Set(["peter.dupont@rinkelberg.com"]);
+
 function isAuthorizedCreator(email) {
-  return typeof email === "string" && email.toLowerCase().endsWith("@goddijn.net");
+  if (typeof email !== "string") return false;
+  const lower = email.toLowerCase();
+  return lower.endsWith("@goddijn.net") || TRUSTED_NON_FAMILY_EMAILS.has(lower);
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
