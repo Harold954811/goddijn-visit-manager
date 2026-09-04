@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     res.status(401).json({ error: "Not signed in" });
     return;
   }
-  if (!isAuthorizedCreator(creator.email)) {
+  if (!(await isAuthorizedCreator(creator.email))) {
     res.status(403).json({ error: "Not authorized to edit visits" });
     return;
   }

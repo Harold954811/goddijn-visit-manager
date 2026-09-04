@@ -43,19 +43,41 @@ const RESEND_FROM_ADDRESS = "stay@goddijn.net";
 // Manager Entra app (see memory://facts/goddijn-entra-id-tenant), so a
 // domain check is the right baseline: it fixes the real gap (anyone with
 // *any* Supabase session on this project could otherwise call this
-// endpoint) without inventing new infrastructure. TRUSTED_NON_FAMILY_EMAILS
-// (below, kept in sync with lib/auth.js's copy) is for a trusted
-// non-@goddijn.net person who's ALSO been explicitly Entra-assigned --
-// being assigned gets someone past sign-in, this list is the separate gate
-// that decides what the app then lets them do. If this grows past a
-// handful of people, move it to Directus the same deliberate way
-// gd_trusted_emails replaced a hardcoded list on the guide site.
-const TRUSTED_NON_FAMILY_EMAILS = new Set(["peter.dupont@rinkelberg.com"]);
+// endpoint) without inventing new infrastructure. Trusted non-@goddijn.net
+// people are read from the SAME gd_trusted_emails Directus collection the
+// guest guide's lib/cf-access.js maintains (kept in sync with lib/auth.js's
+// copy of this fetch logic, deliberately duplicated the same way
+// verifyCaller is) -- one shared source of truth, no code deploy needed to
+// add someone. See memory://processes/goddijn-entra-app-onboarding-checklist.
+let trustedEmailsCache = { emails: null, fetchedAt: 0 };
+const TRUSTED_EMAILS_TTL_MS = 5 * 60 * 1000;
 
-function isAuthorizedCreator(email) {
+async function fetchTrustedEmails() {
+  const now = Date.now();
+  if (trustedEmailsCache.emails && now - trustedEmailsCache.fetchedAt < TRUSTED_EMAILS_TTL_MS) {
+    return trustedEmailsCache.emails;
+  }
+  try {
+    const res = await fetch(
+      "https://cms.goddijn.net/items/gd_trusted_emails?fields=email&limit=-1",
+      { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
+    );
+    if (!res.ok) return trustedEmailsCache.emails || new Set();
+    const { data } = await res.json();
+    const emails = new Set((data || []).map((r) => String(r.email).toLowerCase()));
+    trustedEmailsCache = { emails, fetchedAt: now };
+    return emails;
+  } catch {
+    return trustedEmailsCache.emails || new Set();
+  }
+}
+
+async function isAuthorizedCreator(email) {
   if (typeof email !== "string") return false;
   const lower = email.toLowerCase();
-  return lower.endsWith("@goddijn.net") || TRUSTED_NON_FAMILY_EMAILS.has(lower);
+  if (lower.endsWith("@goddijn.net")) return true;
+  const trusted = await fetchTrustedEmails();
+  return trusted.has(lower);
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -250,7 +272,7 @@ export default async function handler(req, res) {
     res.status(401).json({ error: "Not signed in" });
     return;
   }
-  if (!isAuthorizedCreator(creator.email)) {
+  if (!(await isAuthorizedCreator(creator.email))) {
     res.status(403).json({ error: "Not authorized to create visits" });
     return;
   }
