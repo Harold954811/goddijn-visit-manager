@@ -28,6 +28,7 @@
 //   RESEND_API_KEY                    -- sending access on the goddijn.net domain
 
 import { houseOptions } from "../src/houses.js";
+import { createVisitor } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 const CF_ACCOUNT_ID = "645dba8320bdeb991dfd3411324af9a2";
@@ -153,6 +154,7 @@ async function createDirectusVisit({ guestName, guestEmail, house, startDate, en
       status: "Active",
       notes: notes || null,
       door_code: doorCode || null,
+      ac_visitor_id: null,
     }),
   });
   if (!res.ok) {
@@ -253,12 +255,14 @@ async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, 
   }
 }
 
-// Stub for the future 2N Access Commander integration -- deliberately a
-// no-op today, kept here so wiring in the real call later is additive, not
-// a redesign. See memory://projects/unified-guest-access-2n-cloudflare for
-// what's blocking the real implementation (2N root-password recovery).
-async function provisionDoorCode(_visit) {
-  // no-op
+// Provisions a 2N Access Commander visitor with a PIN door code for the
+// guest, scoped to the right door group for the house. If Harold provided
+// a manual door code, skip this -- he may have a specific code in mind.
+// If the house has no 2N devices (e.g. Rome), skip silently.
+// Returns { visitorId, pin } or null.
+async function provisionDoorCode({ guestName, guestEmail, house, startDate, endDate, doorCode }) {
+  if (doorCode) return null;
+  return createVisitor({ guestName, guestEmail, house, startDate, endDate });
 }
 
 export default async function handler(req, res) {
@@ -290,6 +294,35 @@ export default async function handler(req, res) {
       guestName, guestEmail: normalizedGuestEmail, house, startDate, endDate, notes, doorCode,
     });
     await addToCloudflareAllowlist(normalizedGuestEmail);
+
+    // Provision a 2N door code if no manual one was provided and the house
+    // has 2N devices. If provisioning succeeds, patch the Directus row with
+    // the 2N visitor ID and the generated PIN.
+    let effectiveDoorCode = doorCode;
+    try {
+      const result = await provisionDoorCode({
+        guestName, guestEmail: normalizedGuestEmail, house, startDate, endDate, doorCode,
+      });
+      if (result) {
+        effectiveDoorCode = result.pin;
+        await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(visit?.data?.id)}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}`,
+          },
+          body: JSON.stringify({
+            door_code: result.pin,
+            ac_visitor_id: result.visitorId,
+          }),
+        });
+      }
+    } catch (err) {
+      // 2N provisioning failed -- the visit still gets Cloudflare access and
+      // an email, just without a door code. Log but don't fail the request.
+      console.error("2N provisioning failed (non-fatal):", err);
+    }
+
     await sendInvitationEmail({
       creator,
       guestName,
@@ -297,9 +330,8 @@ export default async function handler(req, res) {
       houseName: house,
       startDate,
       endDate,
-      doorCode,
+      doorCode: effectiveDoorCode,
     });
-    await provisionDoorCode(visit);
     res.status(200).json({ ok: true, visitId: visit?.data?.id ?? null });
   } catch (err) {
     console.error("create-visit failed:", err);

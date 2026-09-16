@@ -15,6 +15,7 @@
 
 import { verifyCaller, isAuthorizedCreator } from "../lib/auth.js";
 import { removeFromCloudflareAllowlist, revokeCloudflareSession } from "../lib/cloudflare.js";
+import { deleteVisitor } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 
@@ -44,7 +45,7 @@ export default async function handler(req, res) {
 
   try {
     const getRes = await fetch(
-      `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_email,status`,
+      `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_email,status,ac_visitor_id`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (!getRes.ok) {
@@ -68,6 +69,17 @@ export default async function handler(req, res) {
     if (!patchRes.ok) {
       const body = await patchRes.text();
       throw new Error(`Directus revoke failed (${patchRes.status}): ${body.slice(0, 300)}`);
+    }
+
+    // Delete the 2N visitor if one was provisioned, revoking their PIN.
+    // Non-fatal: if 2N deletion fails, the visit is still revoked in
+    // Directus and Cloudflare; Harold can clean up the 2N visitor manually.
+    if (visit.ac_visitor_id) {
+      try {
+        await deleteVisitor(visit.ac_visitor_id);
+      } catch (err) {
+        console.error("2N visitor deletion failed (non-fatal):", err);
+      }
     }
 
     const otherRes = await fetch(
