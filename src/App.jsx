@@ -73,7 +73,7 @@ function SignIn() {
 }
 
 function Dashboard({ session, houses }) {
-  const [tab, setTab] = useState("visits"); // "visits" | "new"
+  const [tab, setTab] = useState("visits"); // "visits" | "new" | "creds"
   const [refreshKey, setRefreshKey] = useState(0);
 
   const creatorName =
@@ -108,10 +108,15 @@ function Dashboard({ session, houses }) {
           <button className={tab === "new" ? "tab active" : "tab"} onClick={() => setTab("new")}>
             New visit
           </button>
+          <button className={tab === "creds" ? "tab active" : "tab"} onClick={() => setTab("creds")}>
+            Credentials
+          </button>
         </div>
 
         {tab === "new" ? (
           <VisitForm session={session} houses={houses} onCreated={visitCreated} />
+        ) : tab === "creds" ? (
+          <CredentialsDashboard session={session} houses={houses} />
         ) : (
           <VisitsList session={session} houses={houses} refreshKey={refreshKey} />
         )}
@@ -571,6 +576,162 @@ function VisitsList({ session, houses, refreshKey }) {
                 </tr>
               )
             )}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function CredentialsDashboard({ session, houses }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [rows, setRows] = useState([]);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [visitorsRes, cfRes, visitsRes] = await Promise.all([
+        fetch("/api/2n-visitors", { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        fetch("/api/cloudflare-guests", { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        fetch("/api/list-visits", { headers: { Authorization: `Bearer ${session.access_token}` } }),
+      ]);
+
+      const visitorsData = await visitorsRes.json();
+      const cfData = await cfRes.json();
+      const visitsData = await visitsRes.json();
+
+      if (!visitorsRes.ok) throw new Error(visitorsData.error || "Failed to fetch 2N visitors");
+      if (!cfRes.ok) throw new Error(cfData.error || "Failed to fetch Cloudflare guests");
+      if (!visitsRes.ok) throw new Error(visitsData.error || "Failed to fetch visits");
+
+      // Build a map keyed by email (lowercased)
+      const map = new Map();
+
+      // 2N visitors → door access
+      for (const v of visitorsData.visitors || []) {
+        if (!v.email) continue;
+        const key = v.email.toLowerCase();
+        if (!map.has(key)) map.set(key, { email: key, name: v.name, doorPin: null, doorExpiry: null, doorGroups: [], website: false, house: null, visitStatus: null });
+        const row = map.get(key);
+        row.name = row.name || v.name;
+        row.doorPin = v.pin || row.doorPin;
+        row.doorExpiry = v.visitTo || row.doorExpiry;
+        row.doorGroups = v.groups || row.doorGroups;
+      }
+
+      // Cloudflare guests → website access
+      for (const g of cfData.emails || []) {
+        const key = g.email.toLowerCase();
+        if (!map.has(key)) map.set(key, { email: key, name: null, doorPin: null, doorExpiry: null, doorGroups: [], website: true, house: null, visitStatus: null });
+        map.get(key).website = true;
+      }
+
+      // Directus visits → metadata
+      for (const v of visitsData.visits || []) {
+        const key = (v.guest_email || "").toLowerCase();
+        if (!key) continue;
+        if (!map.has(key)) map.set(key, { email: key, name: v.guest_name, doorPin: null, doorExpiry: null, doorGroups: [], website: false, house: null, visitStatus: null });
+        const row = map.get(key);
+        row.name = row.name || v.guest_name;
+        row.house = v.house;
+        row.visitStatus = v.status;
+        if (v.door_code && !row.doorPin) row.doorPin = v.door_code;
+      }
+
+      const now = new Date();
+      const allRows = Array.from(map.values()).map((r) => ({
+        ...r,
+        doorActive: r.doorExpiry && new Date(r.doorExpiry) >= now,
+        houseName: houses.find((h) => h.matchHouse === r.house)?.name || r.house,
+      }));
+
+      // Sort: active first, then by name
+      allRows.sort((a, b) => {
+        if (a.doorActive !== b.doorActive) return a.doorActive ? -1 : 1;
+        return (a.name || a.email).localeCompare(b.name || b.email);
+      });
+
+      setRows(allRows);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading) return <div className="card wide"><p>Loading credentials…</p></div>;
+  if (error) return <div className="card wide"><p className="error">{error}</p></div>;
+
+  const activeDoor = rows.filter((r) => r.doorActive).length;
+  const activeWeb = rows.filter((r) => r.website).length;
+  const expired = rows.filter((r) => r.doorExpiry && !r.doorActive).length;
+
+  return (
+    <div className="card wide">
+      <div className="creds-summary">
+        <span className="status-badge status-active">{activeDoor} active door codes</span>
+        <span className="status-badge status-active">{activeWeb} website accesses</span>
+        {expired > 0 && <span className="status-badge status-expired">{expired} expired</span>}
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="muted">No credentials found.</p>
+      ) : (
+        <table className="visits-table">
+          <thead>
+            <tr>
+              <th>Guest</th>
+              <th>Door access</th>
+              <th>Website</th>
+              <th>House</th>
+              <th>Visit status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.email} className={r.doorExpiry && !r.doorActive ? "row-past" : ""}>
+                <td>
+                  <div>{r.name || "—"}</div>
+                  <div className="muted small">{r.email}</div>
+                </td>
+                <td>
+                  {r.doorExpiry ? (
+                    <>
+                      <span className={r.doorActive ? "status-badge status-active" : "status-badge status-expired"}>
+                        {r.doorActive ? "Active" : "Expired"}
+                      </span>
+                      {r.doorPin && <div className="muted small">PIN: {r.doorPin}</div>}
+                      <div className="muted small">until {r.doorExpiry.slice(0, 10)}</div>
+                      {r.doorGroups?.length > 0 && <div className="muted small">{r.doorGroups.map((g) => g.name).join(", ")}</div>}
+                    </>
+                  ) : (
+                    <span className="muted small">—</span>
+                  )}
+                </td>
+                <td>
+                  {r.website ? (
+                    <span className="status-badge status-active">Yes</span>
+                  ) : (
+                    <span className="muted small">No</span>
+                  )}
+                </td>
+                <td>{r.houseName || "—"}</td>
+                <td>
+                  {r.visitStatus ? (
+                    <span className={`status-badge status-${r.visitStatus.toLowerCase()}`}>{r.visitStatus}</span>
+                  ) : (
+                    <span className="muted small">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}

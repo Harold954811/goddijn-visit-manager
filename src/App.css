@@ -246,3 +246,10 @@ button.link {
   font-size: 0.85rem;
 }
 .add-guest-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+/* Credentials dashboard (Phase 5) */
+.creds-summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
