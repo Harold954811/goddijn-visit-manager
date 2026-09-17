@@ -130,8 +130,6 @@ async function validateVisitInput({ guestName, guestEmail, house, startDate, end
   if (!guestEmail || typeof guestEmail !== "string" || !EMAIL_RE.test(guestEmail.trim())) {
     return "Guest email is missing or not a valid email address";
   }
-  // House validation now happens against the Directus gd_houses table,
-  // fetched dynamically. The 2N group ID is also looked up from there.
   if (!DATE_RE.test(startDate || "") || !DATE_RE.test(endDate || "")) {
     return "Arrival and departure dates must be in YYYY-MM-DD form";
   }
@@ -146,6 +144,25 @@ async function validateVisitInput({ guestName, guestEmail, house, startDate, end
   }
   if (doorCode && (typeof doorCode !== "string" || doorCode.length > 50)) {
     return "Door code must be text under 50 characters";
+  }
+  return null;
+}
+
+// Validates just the house and dates (shared across all guests in a
+// multi-guest submission). Returns an error string or null.
+async function validateHouseAndDates(house, startDate, endDate) {
+  const housesMap = await fetchHousesMap();
+  if (!house || !housesMap.has(house)) {
+    return "House is missing or not one of the known houses";
+  }
+  if (!DATE_RE.test(startDate || "") || !DATE_RE.test(endDate || "")) {
+    return "Arrival and departure dates must be in YYYY-MM-DD form";
+  }
+  if (Number.isNaN(Date.parse(startDate)) || Number.isNaN(Date.parse(endDate))) {
+    return "Arrival or departure date is not a real date";
+  }
+  if (new Date(endDate) < new Date(startDate)) {
+    return "Departure date is before arrival date";
   }
   return null;
 }
@@ -168,7 +185,7 @@ async function verifyCaller(authHeader) {
   };
 }
 
-async function createDirectusVisit({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }) {
+async function createDirectusVisit({ guestName, guestEmail, house, startDate, endDate, notes, doorCode, visitGroupId, websiteAccess }) {
   const res = await fetch(`${DIRECTUS}/items/gd_visits`, {
     method: "POST",
     headers: {
@@ -186,6 +203,8 @@ async function createDirectusVisit({ guestName, guestEmail, house, startDate, en
       notes: notes || null,
       door_code: doorCode || null,
       ac_visitor_id: null,
+      visit_group_id: visitGroupId || null,
+      website_access: websiteAccess !== false,
     }),
   });
   if (!res.ok) {
@@ -244,17 +263,17 @@ async function addToCloudflareAllowlist(guestEmail) {
   }
 }
 
-async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, startDate, endDate, doorCode }) {
+async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, startDate, endDate, doorCode, websiteAccess }) {
   const safeCreatorName = escapeHtml(creator.name);
   const safeGuestName = escapeHtml(guestName || "there");
   const safeHouseName = escapeHtml(houseName);
-  // Door code is optional -- the 2N Access Commander integration isn't wired
-  // up yet (see memory://projects/unified-guest-access-2n-cloudflare), so
-  // Harold generates it manually in 2N and pastes it in here when he has
-  // one. Omit the paragraph entirely rather than show an empty/placeholder
-  // line when there isn't one yet.
   const doorCodeHtml = doorCode
     ? `<p>Your door code is <strong>${escapeHtml(doorCode)}</strong>.</p>`
+    : "";
+  const websiteHtml = websiteAccess !== false
+    ? `<p>When it's time, sign in at
+        <a href="https://www.goddijn.net">www.goddijn.net</a> with this email address
+        (${escapeHtml(guestEmail)}) to see arrival details, Wi-Fi, and everything else you'll need.</p>`
     : "";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -272,9 +291,7 @@ async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, 
         <p>Hi ${safeGuestName},</p>
         <p>${safeCreatorName} has invited you to stay at <strong>${safeHouseName}</strong>
         from <strong>${startDate}</strong> to <strong>${endDate}</strong>.</p>
-        <p>When it's time, sign in at
-        <a href="https://www.goddijn.net">www.goddijn.net</a> with this email address
-        (${escapeHtml(guestEmail)}) to see arrival details, Wi-Fi, and everything else you'll need.</p>
+        ${websiteHtml}
         ${doorCodeHtml}
         <p>See you soon,<br/>${safeCreatorName}</p>
       `,
@@ -312,63 +329,117 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { guestName, guestEmail, house, startDate, endDate, notes, doorCode } = req.body || {};
-  const validationError = await validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode });
-  if (validationError) {
-    res.status(400).json({ error: validationError });
+  const { guests: guestsInput, house, startDate, endDate, notes, doorCode } = req.body || {};
+
+  // Support both new multi-guest format (guests array) and legacy
+  // single-guest format (guestName/guestEmail) for backward compatibility.
+  let guests;
+  if (Array.isArray(guestsInput) && guestsInput.length > 0) {
+    guests = guestsInput;
+  } else if (req.body.guestName && req.body.guestEmail) {
+    guests = [{ guestName: req.body.guestName, guestEmail: req.body.guestEmail, websiteAccess: req.body.websiteAccess !== false }];
+  } else {
+    res.status(400).json({ error: "Missing guest information" });
     return;
   }
-  const normalizedGuestEmail = guestEmail.trim().toLowerCase();
+
+  // Validate house and dates once (shared across all guests)
+  const houseValidationError = await validateHouseAndDates(house, startDate, endDate);
+  if (houseValidationError) {
+    res.status(400).json({ error: houseValidationError });
+    return;
+  }
+
+  // Validate each guest
+  for (let i = 0; i < guests.length; i++) {
+    const g = guests[i];
+    if (!g.guestName || typeof g.guestName !== "string" || g.guestName.length > 200) {
+      res.status(400).json({ error: `Guest ${i + 1}: name is required (max 200 characters)` });
+      return;
+    }
+    if (!g.guestEmail || !EMAIL_RE.test(g.guestEmail.trim())) {
+      res.status(400).json({ error: `Guest ${i + 1}: email is missing or not a valid email address` });
+      return;
+    }
+  }
+
+  if (notes && (typeof notes !== "string" || notes.length > 2000)) {
+    res.status(400).json({ error: "Notes must be text under 2000 characters" });
+    return;
+  }
+  if (doorCode && (typeof doorCode !== "string" || doorCode.length > 50)) {
+    res.status(400).json({ error: "Door code must be text under 50 characters" });
+    return;
+  }
 
   // Look up the 2N group ID for this house from the Directus houses map.
   const housesMap = await fetchHousesMap();
   const houseData = housesMap.get(house);
   const twoNGroupId = houseData?.twoNGroupId || null;
 
-  try {
-    const visit = await createDirectusVisit({
-      guestName, guestEmail: normalizedGuestEmail, house, startDate, endDate, notes, doorCode,
-    });
-    await addToCloudflareAllowlist(normalizedGuestEmail);
+  // Generate a shared visit_group_id for all guests in this submission.
+  // For single-guest visits, this is still set so the row is consistent.
+  const visitGroupId = crypto.randomUUID();
 
-    // Provision a 2N door code if no manual one was provided and the house
-    // has 2N devices. If provisioning succeeds, patch the Directus row with
-    // the 2N visitor ID and the generated PIN.
-    let effectiveDoorCode = doorCode;
-    try {
-      const result = await provisionDoorCode({
-        guestName, guestEmail: normalizedGuestEmail, startDate, endDate, doorCode, twoNGroupId,
+  try {
+    const results = [];
+    for (const g of guests) {
+      const normalizedEmail = g.guestEmail.trim().toLowerCase();
+      const giveWebsiteAccess = g.websiteAccess !== false;
+
+      const visit = await createDirectusVisit({
+        guestName: g.guestName,
+        guestEmail: normalizedEmail,
+        house, startDate, endDate, notes, doorCode,
+        visitGroupId,
+        websiteAccess: giveWebsiteAccess,
       });
-      if (result) {
-        effectiveDoorCode = result.pin;
-        await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(visit?.data?.id)}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}`,
-          },
-          body: JSON.stringify({
-            door_code: result.pin,
-            ac_visitor_id: result.visitorId,
-          }),
-        });
+
+      if (giveWebsiteAccess) {
+        await addToCloudflareAllowlist(normalizedEmail);
       }
-    } catch (err) {
-      // 2N provisioning failed -- the visit still gets Cloudflare access and
-      // an email, just without a door code. Log but don't fail the request.
-      console.error("2N provisioning failed (non-fatal):", err);
+
+      // Provision a 2N door code for each guest individually
+      let effectiveDoorCode = doorCode;
+      let visitorId = null;
+      try {
+        const result = await provisionDoorCode({
+          guestName: g.guestName, guestEmail: normalizedEmail,
+          startDate, endDate, doorCode, twoNGroupId,
+        });
+        if (result) {
+          effectiveDoorCode = result.pin;
+          visitorId = result.visitorId;
+          await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(visit?.data?.id)}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}`,
+            },
+            body: JSON.stringify({
+              door_code: result.pin,
+              ac_visitor_id: result.visitorId,
+            }),
+          });
+        }
+      } catch (err) {
+        console.error(`2N provisioning failed for ${normalizedEmail} (non-fatal):`, err);
+      }
+
+      await sendInvitationEmail({
+        creator,
+        guestName: g.guestName,
+        guestEmail: normalizedEmail,
+        houseName: house,
+        startDate, endDate,
+        doorCode: effectiveDoorCode,
+        websiteAccess: giveWebsiteAccess,
+      });
+
+      results.push({ email: normalizedEmail, status: "ok", visitorId, pin: effectiveDoorCode });
     }
 
-    await sendInvitationEmail({
-      creator,
-      guestName,
-      guestEmail: normalizedGuestEmail,
-      houseName: house,
-      startDate,
-      endDate,
-      doorCode: effectiveDoorCode,
-    });
-    res.status(200).json({ ok: true, visitId: visit?.data?.id ?? null });
+    res.status(200).json({ ok: true, visitGroupId, results });
   } catch (err) {
     console.error("create-visit failed:", err);
     res.status(502).json({ error: err.message || "Something went wrong" });

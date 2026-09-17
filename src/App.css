@@ -103,6 +103,7 @@ body {
 .status-draft, .status-sent { background: rgba(142,163,199,0.12); color: #8ea3c7; border-color: rgba(142,163,199,0.3); }
 .status-expired { background: rgba(167,173,186,0.12); color: #a7adba; border-color: #313846; }
 .status-revoked { background: rgba(242,114,114,0.12); color: #f27272; border-color: rgba(242,114,114,0.3); }
+.status-door-only { background: rgba(218,165,32,0.12); color: #daa528; border-color: rgba(218,165,32,0.3); margin-left: 4px; }
 .row-editing td { background: #12141a; }
 .edit-grid {
   display: grid;
@@ -221,3 +222,27 @@ button.link {
   padding: 7px 14px;
 }
 .visitor-match .link { white-space: nowrap; }
+
+/* Multi-guest list (Phase 3) */
+.guest-row {
+  padding: 12px 0;
+  border-bottom: 1px solid #1c202a;
+}
+.guest-row:last-of-type { border-bottom: none; }
+.guest-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.add-guest-btn {
+  display: block;
+  text-align: center;
+  padding: 8px;
+  margin: 8px 0 16px;
+  border: 1px dashed #313846;
+  border-radius: 7px;
+  width: 100%;
+  font-size: 0.85rem;
+}
+.add-guest-btn:hover { border-color: #3b82f6; color: #3b82f6; }

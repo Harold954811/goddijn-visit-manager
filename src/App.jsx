@@ -121,8 +121,10 @@ function Dashboard({ session, houses }) {
 }
 
 function VisitForm({ session, houses, onCreated }) {
-  const [guestName, setGuestName] = useState("");
-  const [guestEmail, setGuestEmail] = useState("");
+  // Guest list: each entry is { guestName, guestEmail, websiteAccess }
+  const [guests, setGuests] = useState([
+    { guestName: "", guestEmail: "", websiteAccess: true },
+  ]);
   const [house, setHouse] = useState(houses[0]?.matchHouse ?? "");
   const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState(todayISO());
@@ -131,12 +133,22 @@ function VisitForm({ session, houses, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
 
-  // Existing-visitor lookup state (Phase 2)
-  // existingVisitors: null = not searched, [] = searched and none found, [...] = matches
+  // Existing-visitor lookup state (Phase 2) — applies to the first guest only
   const [existingVisitors, setExistingVisitors] = useState(null);
   const [searching, setSearching] = useState(false);
-  // extendMode: null = not extending, visitorId = extending this visitor
   const [extendMode, setExtendMode] = useState(null);
+
+  function updateGuest(index, field, value) {
+    setGuests((prev) => prev.map((g, i) => (i === index ? { ...g, [field]: value } : g)));
+  }
+
+  function addGuest() {
+    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: true }]);
+  }
+
+  function removeGuest(index) {
+    setGuests((prev) => prev.filter((_, i) => i !== index));
+  }
 
   async function lookupGuestByEmail(email) {
     if (!email || !EMAIL_RE.test(email.trim())) return;
@@ -153,14 +165,16 @@ function VisitForm({ session, houses, onCreated }) {
       );
       setExistingVisitors(matches);
     } catch (err) {
-      // If the lookup fails, silently proceed as "no existing visitor"
       setExistingVisitors([]);
     } finally {
       setSearching(false);
     }
   }
 
-  function resetExtendMode() {
+  function resetForm() {
+    setGuests([{ guestName: "", guestEmail: "", websiteAccess: true }]);
+    setNotes("");
+    setDoorCode("");
     setExtendMode(null);
     setExistingVisitors(null);
   }
@@ -170,8 +184,9 @@ function VisitForm({ session, houses, onCreated }) {
     setSubmitting(true);
     setResult(null);
     try {
-      if (extendMode) {
-        // Extend path: call /api/extend-visit with the existing visitor ID
+      if (extendMode && guests.length === 1) {
+        // Extend path: single guest extending an existing 2N visitor
+        const g = guests[0];
         const res = await fetch("/api/extend-visit", {
           method: "POST",
           headers: {
@@ -180,36 +195,41 @@ function VisitForm({ session, houses, onCreated }) {
           },
           body: JSON.stringify({
             visitorId: extendMode,
-            guestName, guestEmail, house, startDate, endDate, notes,
+            guestName: g.guestName, guestEmail: g.guestEmail,
+            house, startDate, endDate, notes,
+            websiteAccess: g.websiteAccess,
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-        setResult({ ok: true, guestEmail, extended: true });
-        setGuestName("");
-        setGuestEmail("");
-        setNotes("");
-        setDoorCode("");
-        resetExtendMode();
+        setResult({ ok: true, guestEmail: g.guestEmail, extended: true });
+        resetForm();
         onCreated?.();
       } else {
-        // Create-new path: same as before
+        // Create-new path: send all guests to create-visit
         const res = await fetch("/api/create-visit", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }),
+          body: JSON.stringify({
+            guests: guests.map((g) => ({
+              guestName: g.guestName,
+              guestEmail: g.guestEmail,
+              websiteAccess: g.websiteAccess,
+            })),
+            house, startDate, endDate, notes, doorCode,
+          }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-        setResult({ ok: true, guestEmail });
-        setGuestName("");
-        setGuestEmail("");
-        setNotes("");
-        setDoorCode("");
-        resetExtendMode();
+        setResult({
+          ok: true,
+          count: data.results?.length || guests.length,
+          results: data.results,
+        });
+        resetForm();
         onCreated?.();
       }
     } catch (err) {
@@ -232,25 +252,61 @@ function VisitForm({ session, houses, onCreated }) {
   return (
     <div className="card">
       <form onSubmit={handleSubmit}>
-        <label>
-          Guest name
-          <input value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
-        </label>
+        {/* Guest list */}
+        {guests.map((g, idx) => (
+          <div key={idx} className="guest-row">
+            {guests.length > 1 && (
+              <div className="guest-row-header">
+                <span className="muted small">Guest {idx + 1}</span>
+                <button type="button" className="link danger" onClick={() => removeGuest(idx)}>
+                  Remove
+                </button>
+              </div>
+            )}
+            <label>
+              {idx === 0 ? "Guest name" : ""}
+              <input
+                value={g.guestName}
+                onChange={(e) => updateGuest(idx, "guestName", e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              {idx === 0 ? "Guest email" : ""}
+              <input
+                type="email"
+                value={g.guestEmail}
+                onChange={(e) => updateGuest(idx, "guestEmail", e.target.value)}
+                onBlur={(e) => idx === 0 && lookupGuestByEmail(e.target.value)}
+                required
+              />
+            </label>
+            {idx === 0 && (
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={g.websiteAccess}
+                  onChange={(e) => updateGuest(idx, "websiteAccess", e.target.checked)}
+                />
+                Website access (www.goddijn.net)
+              </label>
+            )}
+            {idx > 0 && (
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={g.websiteAccess}
+                  onChange={(e) => updateGuest(idx, "websiteAccess", e.target.checked)}
+                />
+                Website access
+              </label>
+            )}
+          </div>
+        ))}
 
-        <label>
-          Guest email
-          <input
-            type="email"
-            value={guestEmail}
-            onChange={(e) => setGuestEmail(e.target.value)}
-            onBlur={(e) => lookupGuestByEmail(e.target.value)}
-            required
-          />
-        </label>
+        {guests.length === 1 && searching && <p className="muted small">Checking for existing door access…</p>}
 
-        {searching && <p className="muted small">Checking for existing door access…</p>}
-
-        {existingVisitors && existingVisitors.length > 0 && (
+        {guests.length === 1 && existingVisitors && existingVisitors.length > 0 && (
           <div className="existing-visitor-panel">
             <p className="muted small">This person already has access in 2N:</p>
             {existingVisitors.map((v) => (
@@ -258,7 +314,7 @@ function VisitForm({ session, houses, onCreated }) {
                 <span>
                   PIN: <strong>{v.pin || "on file"}</strong>
                   {v.visitTo && <> · valid until {v.visitTo.slice(0, 10)}</>}
-                  {v.groups?.length > 0 && <> · {v.groups.map((g) => g.name).join(", ")}</>}
+                  {v.groups?.length > 0 && <> · {v.groups.map((gr) => gr.name).join(", ")}</>}
                 </span>
                 {extendMode === v.id ? (
                   <button type="button" className="link" onClick={() => setExtendMode(null)}>
@@ -279,12 +335,18 @@ function VisitForm({ session, houses, onCreated }) {
           </div>
         )}
 
+        {!extendMode && (
+          <button type="button" className="link add-guest-btn" onClick={addGuest}>
+            + Add another guest (family visit)
+          </button>
+        )}
+
         <label>
           House
           <select value={house} onChange={(e) => setHouse(e.target.value)} required>
-            {groupedHouses.map((g) => (
-              <optgroup key={g.label} label={g.label}>
-                {g.houses.map((h) => (
+            {groupedHouses.map((grp) => (
+              <optgroup key={grp.label} label={grp.label}>
+                {grp.houses.map((h) => (
                   <option key={h.matchHouse} value={h.matchHouse}>
                     {h.name}
                   </option>
@@ -326,8 +388,9 @@ function VisitForm({ session, houses, onCreated }) {
           />
         </label>
         <p className="hint">
-          If you leave this blank, a 6-digit PIN is generated automatically in 2N Access Commander.
-          Enter a code manually only if you want a specific one.
+          {guests.length > 1
+            ? `Each guest gets their own PIN and email. A shared group ID links them for easy management.`
+            : `If you leave the door code blank, a 6-digit PIN is generated automatically via 2N Access Commander.`}
         </p>
 
         <button type="submit" disabled={submitting}>
@@ -335,6 +398,8 @@ function VisitForm({ session, houses, onCreated }) {
             ? "Processing…"
             : extendMode
             ? "Extend access & send email"
+            : guests.length > 1
+            ? `Grant access & send invites (${guests.length} guests)`
             : "Grant access & send invite"}
         </button>
       </form>
@@ -343,7 +408,9 @@ function VisitForm({ session, houses, onCreated }) {
         <p className="success">
           {result.extended
             ? <>Done — {result.guestEmail || "the guest"}'s access has been extended. An email is on its way with the updated dates.</>
-            : <>Done — {result.guestEmail || "the guest"} can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>
+            : result.count > 1
+            ? <>Done — {result.count} guests processed. Each receives their own PIN and invitation email.</>
+            : <>Done — the guest can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>
           }
         </p>
       )}
@@ -377,10 +444,12 @@ function VisitsList({ session, houses, refreshKey }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRevoke(visit) {
-    if (!window.confirm(`Revoke ${visit.guest_name}'s access to ${houses.find((h) => h.matchHouse === visit.house)?.name || visit.house}?`)) {
-      return;
-    }
+  async function handleRevoke(visit, revokeAll = false) {
+    const houseName = houses.find((h) => h.matchHouse === visit.house)?.name || visit.house;
+    const msg = revokeAll
+      ? `Revoke access for ALL guests in this family visit to ${houseName}?`
+      : `Revoke ${visit.guest_name}'s access to ${houseName}?`;
+    if (!window.confirm(msg)) return;
     try {
       const res = await fetch("/api/revoke-visit", {
         method: "POST",
@@ -388,7 +457,7 @@ function VisitsList({ session, houses, refreshKey }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ id: visit.id }),
+        body: JSON.stringify(revokeAll ? { visitGroupId: visit.visit_group_id } : { id: visit.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -459,6 +528,9 @@ function VisitsList({ session, houses, refreshKey }) {
                   <td>{toDateInputValue(v.end_date)}</td>
                   <td>
                     <span className={`status-badge status-${v.status.toLowerCase()}`}>{v.status}</span>
+                    {v.website_access === false && (
+                      <span className="status-badge status-door-only" title="Door access only, no website">Door only</span>
+                    )}
                   </td>
                   <td className="actions-cell">
                     <button className="link" onClick={() => setEditingId(v.id)}>
@@ -467,6 +539,12 @@ function VisitsList({ session, houses, refreshKey }) {
                     {v.status !== "Revoked" && (
                       <button className="link danger" onClick={() => handleRevoke(v)}>
                         Revoke
+                      </button>
+                    )}
+                    {v.status !== "Revoked" && v.visit_group_id &&
+                     visits.filter((x) => x.visit_group_id === v.visit_group_id && x.status !== "Revoked").length > 1 && (
+                      <button className="link danger" onClick={() => handleRevoke(v, true)}>
+                        Revoke all
                       </button>
                     )}
                   </td>

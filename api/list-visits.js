@@ -5,7 +5,7 @@
 import { verifyCaller, isAuthorizedCreator } from "../lib/auth.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
-const FIELDS = "id,guest_name,guest_email,house,visit_type,start_date,end_date,status,notes,door_code";
+const FIELDS = "id,guest_name,guest_email,house,visit_type,start_date,end_date,status,notes,door_code,ac_visitor_id,visit_group_id,website_access";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {

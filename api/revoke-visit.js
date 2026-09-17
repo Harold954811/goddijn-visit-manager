@@ -1,23 +1,81 @@
-// Revokes one visit's access. Deliberately a soft revoke, not a delete:
-// sets status=Revoked on the gd_visits row (Directus's write-scoped
-// visit-manager token has no delete permission by design -- see
-// memory://projects/goddijn-visit-manager-app -- and a kept, marked-revoked
-// row is a better audit trail than a vanished one anyway).
+// Revokes visit access. Soft revoke: sets status=Revoked on the gd_visits
+// row (no delete — the scoped token has no delete permission by design,
+// and a kept row is a better audit trail).
 //
-// Also removes the guest's email from the Cloudflare guest allow-list, but
-// ONLY if no OTHER active/live visit for that same email still needs it --
-// one person can legitimately have more than one stay. Always revokes any
-// live Cloudflare Access session for the email regardless, so a revoked
-// guest can't keep using an already-authenticated browser tab; this is
-// safe even when another visit still legitimately grants them access
-// elsewhere, since revoking a session only forces a fresh login, it never
-// denies one.
+// Supports two modes:
+//  - { id } — revoke a single visit
+//  - { visitGroupId } — revoke all visits sharing that group ID (family visit)
+//
+// For each revoked visit: sets status=Revoked, deletes the 2N visitor
+// (revoking their PIN), removes the guest's email from Cloudflare's guest
+// allow-list only if no other active visit with website_access needs it,
+// and force-revokes any live Cloudflare session for that email.
 
 import { verifyCaller, isAuthorizedCreator } from "../lib/auth.js";
 import { removeFromCloudflareAllowlist, revokeCloudflareSession } from "../lib/cloudflare.js";
 import { deleteVisitor } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
+
+async function revokeOneVisit(id, token) {
+  // Read the visit row
+  const getRes = await fetch(
+    `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_email,status,ac_visitor_id,website_access`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!getRes.ok) {
+    const body = await getRes.text();
+    throw new Error(`Directus read failed (${getRes.status}): ${body.slice(0, 300)}`);
+  }
+  const { data: visit } = await getRes.json();
+  if (!visit) return null; // not found — skip
+
+  // Already revoked — skip
+  if (visit.status === "Revoked") return visit;
+
+  // Set status=Revoked
+  const patchRes = await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ status: "Revoked" }),
+  });
+  if (!patchRes.ok) {
+    const body = await patchRes.text();
+    throw new Error(`Directus revoke failed (${patchRes.status}): ${body.slice(0, 300)}`);
+  }
+
+  // Delete the 2N visitor if one was provisioned (non-fatal)
+  if (visit.ac_visitor_id) {
+    try {
+      await deleteVisitor(visit.ac_visitor_id);
+    } catch (err) {
+      console.error("2N visitor deletion failed (non-fatal):", err);
+    }
+  }
+
+  // Remove from Cloudflare allow-list only if no other active visit
+  // with website_access=true exists for this email
+  const otherRes = await fetch(
+    `${DIRECTUS}/items/gd_visits?fields=id` +
+      `&filter[guest_email][_eq]=${encodeURIComponent(visit.guest_email)}` +
+      `&filter[status][_nin]=Revoked,Expired&filter[id][_neq]=${encodeURIComponent(id)}&limit=1`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (otherRes.ok) {
+    const otherBody = await otherRes.json();
+    if (!otherBody.data || otherBody.data.length === 0) {
+      await removeFromCloudflareAllowlist(visit.guest_email);
+    }
+  }
+
+  // Always revoke the live Cloudflare session (forces fresh login)
+  await revokeCloudflareSession(visit.guest_email);
+
+  return visit;
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -35,68 +93,39 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { id } = req.body || {};
-  if (id === undefined || id === null || id === "") {
-    res.status(400).json({ error: "Missing visit id" });
-    return;
-  }
-
+  const { id, visitGroupId } = req.body || {};
   const token = process.env.DIRECTUS_VISIT_MANAGER_TOKEN;
 
   try {
-    const getRes = await fetch(
-      `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_email,status,ac_visitor_id`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (!getRes.ok) {
-      const body = await getRes.text();
-      throw new Error(`Directus read failed (${getRes.status}): ${body.slice(0, 300)}`);
-    }
-    const { data: visit } = await getRes.json();
-    if (!visit) {
-      res.status(404).json({ error: "Visit not found" });
+    if (visitGroupId) {
+      // Group revoke: find all visits in the group and revoke each
+      const groupRes = await fetch(
+        `${DIRECTUS}/items/gd_visits?fields=id,status` +
+          `&filter[visit_group_id][_eq]=${encodeURIComponent(visitGroupId)}&limit=-1`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!groupRes.ok) {
+        const body = await groupRes.text();
+        throw new Error(`Directus group query failed (${groupRes.status}): ${body.slice(0, 300)}`);
+      }
+      const { data: groupVisits } = await groupRes.json();
+      const toRevoke = (groupVisits || []).filter((v) => v.status !== "Revoked");
+
+      for (const v of toRevoke) {
+        await revokeOneVisit(v.id, token);
+      }
+      res.status(200).json({ ok: true, revoked: toRevoke.length });
+    } else if (id !== undefined && id !== null && id !== "") {
+      const visit = await revokeOneVisit(id, token);
+      if (!visit) {
+        res.status(404).json({ error: "Visit not found" });
+        return;
+      }
+      res.status(200).json({ ok: true, revoked: 1 });
+    } else {
+      res.status(400).json({ error: "Missing visit id or visit group id" });
       return;
     }
-
-    const patchRes = await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ status: "Revoked" }),
-    });
-    if (!patchRes.ok) {
-      const body = await patchRes.text();
-      throw new Error(`Directus revoke failed (${patchRes.status}): ${body.slice(0, 300)}`);
-    }
-
-    // Delete the 2N visitor if one was provisioned, revoking their PIN.
-    // Non-fatal: if 2N deletion fails, the visit is still revoked in
-    // Directus and Cloudflare; Harold can clean up the 2N visitor manually.
-    if (visit.ac_visitor_id) {
-      try {
-        await deleteVisitor(visit.ac_visitor_id);
-      } catch (err) {
-        console.error("2N visitor deletion failed (non-fatal):", err);
-      }
-    }
-
-    const otherRes = await fetch(
-      `${DIRECTUS}/items/gd_visits?fields=id` +
-        `&filter[guest_email][_eq]=${encodeURIComponent(visit.guest_email)}` +
-        `&filter[status][_nin]=Revoked,Expired&filter[id][_neq]=${encodeURIComponent(id)}&limit=1`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (otherRes.ok) {
-      const otherBody = await otherRes.json();
-      if (!otherBody.data || otherBody.data.length === 0) {
-        await removeFromCloudflareAllowlist(visit.guest_email);
-      }
-    }
-    await revokeCloudflareSession(visit.guest_email);
-
-    res.status(200).json({ ok: true });
   } catch (err) {
     console.error("revoke-visit failed:", err);
     res.status(502).json({ error: err.message || "Something went wrong" });
