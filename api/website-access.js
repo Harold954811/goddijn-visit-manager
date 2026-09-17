@@ -109,8 +109,10 @@ export default async function handler(req, res) {
   }
 
   // POST: grant standing access (add to "Invited guests" policy)
+  // If house is provided, also create a Directus visit row scoped to that house
+  // so the guest guide only shows that house's content.
   if (req.method === "POST") {
-    const { email } = req.body || {};
+    const { email, house } = req.body || {};
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       res.status(400).json({ error: "Valid email is required" });
       return;
@@ -118,13 +120,51 @@ export default async function handler(req, res) {
     try {
       const normalizedEmail = email.trim().toLowerCase();
       const { emails, policy } = await getPolicyEmails(STANDING_POLICY_ID);
-      if (emails.includes(normalizedEmail)) {
-        res.status(200).json({ ok: true, message: "Already has access" });
-        return;
+      if (!emails.includes(normalizedEmail)) {
+        const newEmails = [...emails, normalizedEmail];
+        await putPolicy(STANDING_POLICY_ID, policy, newEmails.map((e) => ({ email: { email: e } })));
       }
-      const newEmails = [...emails, normalizedEmail];
-      await putPolicy(STANDING_POLICY_ID, policy, newEmails.map((e) => ({ email: { email: e } })));
-      res.status(200).json({ ok: true, email: normalizedEmail });
+
+      // If a house is specified, create a Directus visit row for scoping
+      let visitCreated = false;
+      if (house) {
+        const DIRECTUS = "https://cms.goddijn.net";
+        const token = process.env.DIRECTUS_VISIT_MANAGER_TOKEN;
+        // Long-lived dates: 10 years from now
+        const now = new Date();
+        const farFuture = new Date(now.getTime() + 10 * 365 * 24 * 60 * 60 * 1000);
+        const startDate = now.toISOString().slice(0, 10);
+        const endDate = farFuture.toISOString().slice(0, 10);
+
+        const visitRes = await fetch(`${DIRECTUS}/items/gd_visits`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            guest_name: email.split("@")[0],
+            guest_email: normalizedEmail,
+            visit_type: "Standing access",
+            house,
+            start_date: `${startDate}T00:00:00.000Z`,
+            end_date: `${endDate}T23:59:59.000Z`,
+            status: "Active",
+            notes: "Granted via Website Access console",
+            door_code: null,
+            ac_visitor_id: null,
+            visit_group_id: null,
+            website_access: true,
+          }),
+        });
+        visitCreated = visitRes.ok;
+        if (!visitRes.ok) {
+          const body = await visitRes.text();
+          console.error("Directus visit create failed:", body.slice(0, 300));
+        }
+      }
+
+      res.status(200).json({ ok: true, email: normalizedEmail, houseScoped: !!house, visitCreated });
     } catch (err) {
       console.error("website-access POST failed:", err);
       res.status(502).json({ error: err.message || "Something went wrong" });

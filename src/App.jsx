@@ -121,7 +121,7 @@ function Dashboard({ session, houses }) {
         ) : tab === "creds" ? (
           <CredentialsDashboard session={session} houses={houses} />
         ) : tab === "access" ? (
-          <WebsiteAccessConsole session={session} />
+          <WebsiteAccessConsole session={session} houses={houses} />
         ) : (
           <VisitsList session={session} houses={houses} refreshKey={refreshKey} />
         )}
@@ -1064,11 +1064,13 @@ function EditRow({ visit, session, houses, onDone, onCancel }) {
   );
 }
 
-function WebsiteAccessConsole({ session }) {
+function WebsiteAccessConsole({ session, houses }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [newEmail, setNewEmail] = useState("");
+  const [selectedHouse, setSelectedHouse] = useState("");
+  const [selectedHouse, setSelectedHouse] = useState("");
   const [actionMsg, setActionMsg] = useState(null);
   const [revoking, setRevoking] = useState(null);
 
@@ -1104,12 +1106,13 @@ function WebsiteAccessConsole({ session }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ email: newEmail }),
+        body: JSON.stringify({ email: newEmail, house: selectedHouse || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to grant access");
-      setActionMsg({ ok: true, text: `Access granted to ${newEmail}` });
+      setActionMsg({ ok: true, text: selectedHouse ? `Access granted to ${newEmail} (scoped to ${houses.find(h => h.matchHouse === selectedHouse)?.name || selectedHouse})` : `Access granted to ${newEmail} (full site)` });
       setNewEmail("");
+      setSelectedHouse("");;
       load();
     } catch (err) {
       setActionMsg({ ok: false, text: err.message });
@@ -1152,16 +1155,29 @@ function WebsiteAccessConsole({ session }) {
         <span className="status-badge status-active">{visitCount} visit guests</span>
       </div>
 
-      <form onSubmit={grantAccess} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-        <input
-          type="email"
-          value={newEmail}
-          onChange={(e) => setNewEmail(e.target.value)}
-          placeholder="Email address to grant standing access"
-          required
-          style={{ flex: 1 }}
-        />
-        <button type="submit" style={{ width: "auto", padding: "9px 16px" }}>Grant</button>
+      <form onSubmit={grantAccess} style={{ marginBottom: "16px" }}>
+        <label>
+          Email address
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder="email@example.com"
+            required
+          />
+        </label>
+        <label>
+          House (optional — leave empty for full site access)
+          <select value={selectedHouse} onChange={(e) => setSelectedHouse(e.target.value)}>
+            <option value="">Full site (all houses)</option>
+            {houses.map((h) => (
+              <option key={h.matchHouse} value={h.matchHouse}>
+                {h.groupLabel} — {h.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" style={{ width: "auto", padding: "9px 16px" }}>Grant access</button>
       </form>
 
       {actionMsg && (
