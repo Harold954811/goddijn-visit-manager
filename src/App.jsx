@@ -137,6 +137,7 @@ function VisitForm({ session, houses, onCreated }) {
   const [existingVisitors, setExistingVisitors] = useState(null);
   const [searching, setSearching] = useState(false);
   const [extendMode, setExtendMode] = useState(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
   function updateGuest(index, field, value) {
     setGuests((prev) => prev.map((g, i) => (i === index ? { ...g, [field]: value } : g)));
@@ -177,6 +178,7 @@ function VisitForm({ session, houses, onCreated }) {
     setDoorCode("");
     setExtendMode(null);
     setExistingVisitors(null);
+    setSelectedTemplateId("");
   }
 
   async function handleSubmit(e) {
@@ -220,6 +222,7 @@ function VisitForm({ session, houses, onCreated }) {
               websiteAccess: g.websiteAccess,
             })),
             house, startDate, endDate, notes, doorCode,
+            templateId: selectedTemplateId || undefined,
           }),
         });
         const data = await res.json();
@@ -392,6 +395,23 @@ function VisitForm({ session, houses, onCreated }) {
             ? `Each guest gets their own PIN and email. A shared group ID links them for easy management.`
             : `If you leave the door code blank, a 6-digit PIN is generated automatically via 2N Access Commander.`}
         </p>
+
+        {templates.length > 0 && !extendMode && (
+          <label>
+            Email template
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => setSelectedTemplateId(e.target.value)}
+            >
+              <option value="">Default (auto-selected)</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}{t.is_default ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <button type="submit" disabled={submitting}>
           {submitting

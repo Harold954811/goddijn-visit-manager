@@ -28,6 +28,7 @@
 //   RESEND_API_KEY                    -- sending access on the goddijn.net domain
 
 import { createVisitor } from "../lib/2n.js";
+import { getTemplate, renderTemplate } from "../lib/email.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 const CF_ACCOUNT_ID = "645dba8320bdeb991dfd3411324af9a2";
@@ -303,7 +304,30 @@ async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, 
   }
 }
 
-// Provisions a 2N Access Commander visitor with a PIN door code for the
+// Sends an email using a pre-rendered template (subject + html body).
+// Used when a Directus template was fetched and rendered via lib/email.js.
+async function sendTemplatedEmail({ creator, guestEmail, subject, html }) {
+  const safeCreatorName = escapeHtml(creator.name);
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: `${safeCreatorName} <${RESEND_FROM_ADDRESS}>`,
+      reply_to: creator.email,
+      to: [guestEmail],
+      bcc: ["harold@goddijn.net", "corinne@goddijn.net"],
+      subject,
+      html,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend send failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+}
 // guest, scoped to the right door group for the house. If Harold provided
 // a manual door code, skip this -- he may have a specific code in mind.
 // If the house has no 2N devices (e.g. Rome), skip silently.
@@ -329,7 +353,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { guests: guestsInput, house, startDate, endDate, notes, doorCode } = req.body || {};
+  const { guests: guestsInput, house, startDate, endDate, notes, doorCode, templateId } = req.body || {};
 
   // Support both new multi-guest format (guests array) and legacy
   // single-guest format (guestName/guestEmail) for backward compatibility.
@@ -381,6 +405,17 @@ export default async function handler(req, res) {
   // For single-guest visits, this is still set so the row is consistent.
   const visitGroupId = crypto.randomUUID();
 
+  // Fetch the email template. If templateId is provided, use it; otherwise
+  // fall back to the default for the visit type (invitation or door_only).
+  const allDoorOnly = guests.every((g) => g.websiteAccess === false);
+  const defaultTemplateType = allDoorOnly ? "door_only" : "invitation";
+  let template = null;
+  try {
+    template = await getTemplate(templateId, defaultTemplateType, process.env.DIRECTUS_VISIT_MANAGER_TOKEN);
+  } catch (err) {
+    console.error("Failed to fetch email template (non-fatal, will use hardcoded fallback):", err);
+  }
+
   try {
     const results = [];
     for (const g of guests) {
@@ -426,15 +461,29 @@ export default async function handler(req, res) {
         console.error(`2N provisioning failed for ${normalizedEmail} (non-fatal):`, err);
       }
 
-      await sendInvitationEmail({
-        creator,
-        guestName: g.guestName,
-        guestEmail: normalizedEmail,
-        houseName: house,
-        startDate, endDate,
-        doorCode: effectiveDoorCode,
-        websiteAccess: giveWebsiteAccess,
-      });
+      if (template) {
+        // Use the template system
+        const { subject, html } = renderTemplate(template, {
+          guestName: g.guestName,
+          guestEmail: normalizedEmail,
+          houseName: house,
+          startDate, endDate,
+          doorCode: effectiveDoorCode,
+          creatorName: creator.name,
+        });
+        await sendTemplatedEmail({ creator, guestEmail: normalizedEmail, subject, html });
+      } else {
+        // Fallback: use the hardcoded email function
+        await sendInvitationEmail({
+          creator,
+          guestName: g.guestName,
+          guestEmail: normalizedEmail,
+          houseName: house,
+          startDate, endDate,
+          doorCode: effectiveDoorCode,
+          websiteAccess: giveWebsiteAccess,
+        });
+      }
 
       results.push({ email: normalizedEmail, status: "ok", visitorId, pin: effectiveDoorCode });
     }
