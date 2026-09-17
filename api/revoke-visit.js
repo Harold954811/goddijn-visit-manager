@@ -13,7 +13,7 @@
 
 import { verifyCaller, isAuthorizedCreator } from "../lib/auth.js";
 import { removeFromCloudflareAllowlist, revokeCloudflareSession } from "../lib/cloudflare.js";
-import { deleteVisitor, deactivateVisitor } from "../lib/2n.js";
+import { deleteVisitor, revokeVisitorAccess } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 
@@ -57,7 +57,7 @@ async function revokeOneVisit(id, token, delete2NVisitor = false) {
       if (delete2NVisitor) {
         await deleteVisitor(visit.ac_visitor_id);
       } else {
-        await deactivateVisitor(visit.ac_visitor_id);
+        await revokeVisitorAccess(visit.ac_visitor_id);
       }
     } catch (err) {
       console.error("2N visitor handling failed:", err);
