@@ -131,16 +131,14 @@ function VisitForm({ session, houses, onCreated }) {
 
   // Guest list: each entry is { guestName, guestEmail, websiteAccess }
   const [guests, setGuests] = useState([
-    { guestName: "", guestEmail: "", websiteAccess: true },
+    { guestName: "", guestEmail: "", websiteAccess: false },
   ]);
 
-  // Destination: property first, then optional house within that property
-  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
-  const [house, setHouse] = useState(houses[0]?.matchHouse ?? "");
+  // Destination: property dropdown, then optional house dropdown
+  const [selectedPropertyId, setSelectedPropertyId] = useState("");
+  const [house, setHouse] = useState("");
   const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState(todayISO());
-  const [notes, setNotes] = useState("");
-  const [doorCode, setDoorCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [templates, setTemplates] = useState([]);
@@ -158,11 +156,7 @@ function VisitForm({ session, houses, onCreated }) {
 
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
-  // When a visitor is selected from the autocomplete dropdown, store their
-  // 2N visitor ID so the server can reuse their PIN instead of creating new.
   const [selectedVisitorId, setSelectedVisitorId] = useState(null);
-
-  // All 2N visitors for name autocomplete — fetched once on mount
   const [allVisitors, setAllVisitors] = useState([]);
   const [nameSuggestions, setNameSuggestions] = useState([]);
   const [nameActiveSuggestion, setNameActiveSuggestion] = useState(-1);
@@ -176,7 +170,6 @@ function VisitForm({ session, houses, onCreated }) {
       .catch(() => {});
   }, [session]);
 
-  // The selected template object (for preview)
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) || null;
   const defaultTemplateType = visitType === "day" ? "door_only" : "invitation";
   const fallbackTemplate = templates.find((t) => t.template_type === defaultTemplateType && t.is_default) || null;
@@ -187,9 +180,7 @@ function VisitForm({ session, houses, onCreated }) {
     if (index === 0 && field === "guestName") {
       const q = value.trim().toLowerCase();
       if (q.length >= 1) {
-        const matches = allVisitors
-          .filter((v) => v.name && v.name.toLowerCase().includes(q))
-          .slice(0, 6);
+        const matches = allVisitors.filter((v) => v.name && v.name.toLowerCase().includes(q)).slice(0, 6);
         setNameSuggestions(matches);
         setNameActiveSuggestion(-1);
       } else {
@@ -207,7 +198,7 @@ function VisitForm({ session, houses, onCreated }) {
   }
 
   function addGuest() {
-    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: visitType !== "day" }]);
+    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: false }]);
   }
 
   function removeGuest(index) {
@@ -220,12 +211,11 @@ function VisitForm({ session, houses, onCreated }) {
       const today = todayISO();
       setStartDate(today);
       setEndDate(today);
-      setGuests((prev) => prev.map((g) => ({ ...g, websiteAccess: false })));
-      setSelectedPropertyId(null);
-    } else {
-      setGuests((prev) => prev.map((g) => ({ ...g, websiteAccess: true })));
-      setSelectedPropertyId(null);
     }
+    // Reset destination and website access on type change
+    setSelectedPropertyId("");
+    setHouse("");
+    setGuests((prev) => prev.map((g) => ({ ...g, websiteAccess: false })));
   }
 
   function selectProperty(propId) {
@@ -233,43 +223,27 @@ function VisitForm({ session, houses, onCreated }) {
     const prop = PROPERTIES.find((p) => p.id === propId);
     if (!prop) return;
     if (visitType === "day") {
-      // Day visitor: house = domain name (e.g. "Loveland", "Castellas")
-      const domain = prop.domains[0];
-      const propertyName = prop.domains.length > 1 ? domain.name : prop.name;
-      setHouse(propertyName);
+      // Day visitor: house = property name (e.g. "Mougins")
+      setHouse(prop.name);
     } else {
-      // House guest: auto-select first house in property
+      // House guest: auto-select first house
       const firstHouse = prop.domains.flatMap((d) => d.houses)[0];
       if (firstHouse) setHouse(firstHouse.matchHouse);
     }
   }
 
-  // For house-guest mode: houses available within the selected property
+  // Houses available within the selected property (for house guest mode)
   const propertyHouses = selectedPropertyId
     ? PROPERTIES.find((p) => p.id === selectedPropertyId)?.domains.flatMap((d) =>
         d.houses.map((h) => ({ ...h, domainLabel: d.name }))) || []
     : [];
 
-  // Build property chips for the selector
-  // For Mougins, show Loveland and Castellas as separate options
-  const propertyChips = [];
-  for (const prop of PROPERTIES) {
-    if (prop.domains.length > 1) {
-      for (const domain of prop.domains) {
-        propertyChips.push({ id: `${prop.id}:${domain.id}`, label: domain.name, propId: prop.id });
-      }
-    } else {
-      propertyChips.push({ id: prop.id, label: prop.name, propId: prop.id });
-    }
-  }
-
   function resetForm() {
-    setGuests([{ guestName: "", guestEmail: "", websiteAccess: true }]);
-    setNotes("");
-    setDoorCode("");
+    setGuests([{ guestName: "", guestEmail: "", websiteAccess: false }]);
     setSelectedVisitorId(null);
     setSelectedTemplateId("");
-    setSelectedPropertyId(null);
+    setSelectedPropertyId("");
+    setHouse("");
     setCalendarAdd(false);
   }
 
@@ -290,7 +264,7 @@ function VisitForm({ session, houses, onCreated }) {
             guestEmail: g.guestEmail,
             websiteAccess: visitType === "day" ? false : g.websiteAccess,
           })),
-          house, startDate, endDate, notes, doorCode,
+          house, startDate, endDate,
           visitType,
           templateId: selectedTemplateId || undefined,
           existingVisitorId: selectedVisitorId || undefined,
@@ -312,15 +286,15 @@ function VisitForm({ session, houses, onCreated }) {
     }
   }
 
-  // Render a simple email preview by replacing placeholders in the template body
   function renderPreview(template) {
     if (!template) return "No template selected.";
     let body = template.body || "";
     const firstGuest = guests[0] || {};
     const replacements = {
       guestName: firstGuest.guestName || "[guest name]",
+      houseName: houses.find((h) => h.matchHouse === house)?.name || house || "[house]",
       house: houses.find((h) => h.matchHouse === house)?.name || house || "[house]",
-      doorCode: doorCode || "[auto-generated]",
+      doorCode: "[auto-generated]",
       startDate: startDate || "[arrival]",
       endDate: endDate || "[departure]",
       creatorName: session.user.user_metadata?.full_name || session.user.email || "[your name]",
@@ -350,7 +324,7 @@ function VisitForm({ session, houses, onCreated }) {
             onClick={() => selectVisitType("house")}
           >
             <div className="visit-type-card-title">House Guest</div>
-            <div className="visit-type-card-desc">Stays overnight. Door PIN + website access for their house.</div>
+            <div className="visit-type-card-desc">Stays overnight. Door PIN + optional website access.</div>
           </button>
         </div>
 
@@ -416,16 +390,6 @@ function VisitForm({ session, houses, onCreated }) {
                 required
               />
             </label>
-            {visitType === "house" && (
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={g.websiteAccess}
-                  onChange={(e) => updateGuest(idx, "websiteAccess", e.target.checked)}
-                />
-                {idx === 0 ? "Website access (www.goddijn.net)" : "Website access"}
-              </label>
-            )}
           </div>
         ))}
 
@@ -453,24 +417,24 @@ function VisitForm({ session, houses, onCreated }) {
           </label>
         </div>
 
-        {/* Destination: property chips, then optional house selector */}
-        <label>Which property</label>
-        <div className="property-selector">
-          {propertyChips.map((chip) => (
-            <button
-              key={chip.id}
-              type="button"
-              className={`property-chip ${selectedPropertyId === chip.propId ? "selected" : ""}`}
-              onClick={() => selectProperty(chip.propId)}
-            >
-              {chip.label}
-            </button>
-          ))}
-        </div>
+        {/* Destination: property dropdown, then optional house dropdown */}
+        <label>
+          Property
+          <select
+            value={selectedPropertyId}
+            onChange={(e) => selectProperty(e.target.value)}
+            required
+          >
+            <option value="">Select a property</option>
+            {PROPERTIES.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </label>
 
         {visitType === "house" && selectedPropertyId && propertyHouses.length > 1 && (
           <label>
-            Which house
+            House
             <select value={house} onChange={(e) => setHouse(e.target.value)} required>
               {propertyHouses.map((h) => (
                 <option key={h.matchHouse} value={h.matchHouse}>
@@ -481,25 +445,17 @@ function VisitForm({ session, houses, onCreated }) {
           </label>
         )}
 
-        <label>
-          Notes (optional, internal only)
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-        </label>
-
-        <label>
-          Door code (optional)
-          <input
-            value={doorCode}
-            onChange={(e) => setDoorCode(e.target.value)}
-            placeholder="Leave blank to auto-generate via 2N Access Commander"
-            maxLength={50}
-          />
-        </label>
-        <p className="hint">
-          {guests.length > 1
-            ? `Each guest gets their own PIN and email. A shared group ID links them for easy management.`
-            : `If you leave the door code blank, a 6-digit PIN is generated automatically via 2N Access Commander.`}
-        </p>
+        {/* Website access toggle — appears after destination is selected */}
+        {visitType === "house" && house && (
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={guests[0]?.websiteAccess || false}
+              onChange={(e) => setGuests((prev) => prev.map((g, i) => (i === 0 ? { ...g, websiteAccess: e.target.checked } : g)))}
+            />
+            Website access (www.goddijn.net)
+          </label>
+        )}
 
         {templates.length > 0 && (
           <label>
@@ -555,7 +511,7 @@ function VisitForm({ session, houses, onCreated }) {
       {result?.ok && (
         <p className="success">
           {visitType === "day"
-            ? <>Done — the day visitor's entry code and address are on their way by email.</>
+            ? <>Done — the day visitor\'s entry code and address are on their way by email.</>
             : result.count > 1
             ? <>Done — {result.count} guests processed. Each receives their own PIN and invitation email.</>
             : <>Done — the guest can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>}
@@ -565,7 +521,6 @@ function VisitForm({ session, houses, onCreated }) {
     </div>
   );
 }
-
 function VisitsList({ session, houses, refreshKey }) {
   const [visits, setVisits] = useState(null);
   const [error, setError] = useState(null);
