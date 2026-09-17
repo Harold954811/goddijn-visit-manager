@@ -1070,7 +1070,6 @@ function WebsiteAccessConsole({ session, houses }) {
   const [error, setError] = useState(null);
   const [newEmail, setNewEmail] = useState("");
   const [selectedHouse, setSelectedHouse] = useState("");
-  const [selectedHouse, setSelectedHouse] = useState("");
   const [actionMsg, setActionMsg] = useState(null);
   const [revoking, setRevoking] = useState(null);
 
@@ -1112,7 +1111,7 @@ function WebsiteAccessConsole({ session, houses }) {
       if (!res.ok) throw new Error(data.error || "Failed to grant access");
       setActionMsg({ ok: true, text: selectedHouse ? `Access granted to ${newEmail} (scoped to ${houses.find(h => h.matchHouse === selectedHouse)?.name || selectedHouse})` : `Access granted to ${newEmail} (full site)` });
       setNewEmail("");
-      setSelectedHouse("");;
+      setSelectedHouse("");
       load();
     } catch (err) {
       setActionMsg({ ok: false, text: err.message });
