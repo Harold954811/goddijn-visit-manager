@@ -111,12 +111,17 @@ function Dashboard({ session, houses }) {
           <button className={`tab tab-creds ${tab === "creds" ? "active" : ""}`} onClick={() => setTab("creds")}>
             Credentials
           </button>
+          <button className={`tab ${tab === "access" ? "active" : ""}`} onClick={() => setTab("access")}>
+            Website Access
+          </button>
         </div>
 
         {tab === "new" ? (
           <VisitForm session={session} houses={houses} onCreated={visitCreated} />
         ) : tab === "creds" ? (
           <CredentialsDashboard session={session} houses={houses} />
+        ) : tab === "access" ? (
+          <WebsiteAccessConsole session={session} />
         ) : (
           <VisitsList session={session} houses={houses} refreshKey={refreshKey} />
         )}
@@ -1056,5 +1061,153 @@ function EditRow({ visit, session, houses, onDone, onCancel }) {
         </div>
       </td>
     </tr>
+  );
+}
+
+function WebsiteAccessConsole({ session }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [newEmail, setNewEmail] = useState("");
+  const [actionMsg, setActionMsg] = useState(null);
+  const [revoking, setRevoking] = useState(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/website-access", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load");
+      setRows(data.emails || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function grantAccess(e) {
+    e.preventDefault();
+    setActionMsg(null);
+    try {
+      const res = await fetch("/api/website-access", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ email: newEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to grant access");
+      setActionMsg({ ok: true, text: `Access granted to ${newEmail}` });
+      setNewEmail("");
+      load();
+    } catch (err) {
+      setActionMsg({ ok: false, text: err.message });
+    }
+  }
+
+  async function revokeAccess(email) {
+    setRevoking(email);
+    setActionMsg(null);
+    try {
+      const res = await fetch("/api/website-access", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to revoke access");
+      setActionMsg({ ok: true, text: `Access revoked for ${email}` });
+      load();
+    } catch (err) {
+      setActionMsg({ ok: false, text: err.message });
+    } finally {
+      setRevoking(null);
+    }
+  }
+
+  if (loading) return <div className="card wide"><p>Loading website access…</p></div>;
+  if (error) return <div className="card wide"><p className="error">{error}</p></div>;
+
+  const standingCount = rows.filter((r) => r.type === "standing" || r.type === "both").length;
+  const visitCount = rows.filter((r) => r.type === "visit").length;
+
+  return (
+    <div className="card wide">
+      <div className="creds-summary">
+        <span className="status-badge status-active">{standingCount} standing</span>
+        <span className="status-badge status-active">{visitCount} visit guests</span>
+      </div>
+
+      <form onSubmit={grantAccess} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <input
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          placeholder="Email address to grant standing access"
+          required
+          style={{ flex: 1 }}
+        />
+        <button type="submit" style={{ width: "auto", padding: "9px 16px" }}>Grant</button>
+      </form>
+
+      {actionMsg && (
+        <p className={actionMsg.ok ? "success" : "error"} style={{ marginTop: "4px", marginBottom: "12px" }}>
+          {actionMsg.text}
+        </p>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="muted">No email-OTP access entries found.</p>
+      ) : (
+        <table className="visits-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Access type</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.email}>
+                <td>{r.email}</td>
+                <td>
+                  <span className={`status-badge ${r.type === "standing" ? "status-active" : r.type === "both" ? "status-active" : "status-sent"}`}>
+                    {r.source}
+                  </span>
+                </td>
+                <td className="actions-cell">
+                  <button
+                    className="link danger"
+                    disabled={revoking === r.email}
+                    onClick={() => revokeAccess(r.email)}
+                  >
+                    {revoking === r.email ? "Revoking…" : "Revoke"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <p className="muted small" style={{ marginTop: "16px" }}>
+        Standing = permanent email-OTP access (family, trusted people). Visit guest = temporary, added automatically when a visit is created. Entra SSO group members are not listed here.
+      </p>
+    </div>
   );
 }
