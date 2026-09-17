@@ -537,15 +537,7 @@ function VisitForm({ session, houses, onCreated }) {
           </details>
         )}
 
-        {/* Calendar checkbox (placeholder) */}
-        <label className="calendar-checkbox">
-          <input
-            type="checkbox"
-            checked={calendarAdd}
-            onChange={(e) => setCalendarAdd(e.target.checked)}
-          />
-          Add this stay to the Calendar
-        </label>
+        {/* Calendar checkbox removed — not wired up, relying on Siri for now */}
 
         <div className="sticky-submit">
           <button type="submit" disabled={submitting}>
