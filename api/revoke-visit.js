@@ -13,7 +13,7 @@
 
 import { verifyCaller, isAuthorizedCreator } from "../lib/auth.js";
 import { removeFromCloudflareAllowlist, revokeCloudflareSession } from "../lib/cloudflare.js";
-import { deleteVisitor } from "../lib/2n.js";
+import { deleteVisitor, deactivateVisitor } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 
@@ -47,12 +47,18 @@ async function revokeOneVisit(id, token, delete2NVisitor = false) {
     throw new Error(`Directus revoke failed (${patchRes.status}): ${body.slice(0, 300)}`);
   }
 
-  // Delete the 2N visitor if requested and one was provisioned (non-fatal)
-  if (delete2NVisitor && visit.ac_visitor_id) {
+  // Handle the 2N visitor: delete entirely, or deactivate (set VisitTo to now)
+  // so the PIN stops working but the visitor record remains for future re-extension.
+  // Non-fatal: if 2N fails, the visit is still revoked in Directus and Cloudflare.
+  if (visit.ac_visitor_id) {
     try {
-      await deleteVisitor(visit.ac_visitor_id);
+      if (delete2NVisitor) {
+        await deleteVisitor(visit.ac_visitor_id);
+      } else {
+        await deactivateVisitor(visit.ac_visitor_id);
+      }
     } catch (err) {
-      console.error("2N visitor deletion failed (non-fatal):", err);
+      console.error("2N visitor handling failed (non-fatal):", err);
     }
   }
 

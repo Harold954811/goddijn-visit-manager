@@ -460,6 +460,7 @@ function VisitsList({ session, houses, refreshKey }) {
   const [error, setError] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [showPast, setShowPast] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState(null); // { visit, revokeAll } or null
 
   async function load() {
     setError(null);
@@ -480,18 +481,14 @@ function VisitsList({ session, houses, refreshKey }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRevoke(visit, revokeAll = false) {
-    const houseName = houses.find((h) => h.matchHouse === visit.house)?.name || visit.house;
-    const who = revokeAll
-      ? `ALL guests in this family visit to ${houseName}`
-      : `${visit.guest_name}'s access to ${houseName}`;
-    const deleteDoor = window.confirm(
-      `Revoke ${who}?\n\nClick OK to also DELETE the 2N door visitor (PIN stops working).\nClick Cancel to keep the door PIN valid for a future visit.`
-    );
-    const proceed = window.confirm(
-      `Confirm: revoke ${who}${deleteDoor ? " and delete door access" : " (keep door PIN)"}?`
-    );
-    if (!proceed) return;
+  function handleRevoke(visit, revokeAll = false) {
+    setRevokeTarget({ visit, revokeAll });
+  }
+
+  async function confirmRevoke(deleteVisitor) {
+    if (!revokeTarget) return;
+    const { visit, revokeAll } = revokeTarget;
+    setRevokeTarget(null);
     try {
       const res = await fetch("/api/revoke-visit", {
         method: "POST",
@@ -501,8 +498,8 @@ function VisitsList({ session, houses, refreshKey }) {
         },
         body: JSON.stringify(
           revokeAll
-            ? { visitGroupId: visit.visit_group_id, deleteVisitor: deleteDoor }
-            : { id: visit.id, deleteVisitor: deleteDoor }
+            ? { visitGroupId: visit.visit_group_id, deleteVisitor }
+            : { id: visit.id, deleteVisitor }
         ),
       });
       const data = await res.json();
@@ -600,6 +597,70 @@ function VisitsList({ session, houses, refreshKey }) {
           </tbody>
         </table>
       )}
+
+      {revokeTarget && (
+        <RevokeModal
+          visit={revokeTarget.visit}
+          revokeAll={revokeTarget.revokeAll}
+          houses={houses}
+          onConfirm={confirmRevoke}
+          onCancel={() => setRevokeTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function RevokeModal({ visit, revokeAll, houses, onConfirm, onCancel }) {
+  const houseName = houses.find((h) => h.matchHouse === visit.house)?.name || visit.house;
+  const who = revokeAll
+    ? `all guests in the family visit to ${houseName}`
+    : `${visit.guest_name}'s access to ${houseName}`;
+  const hasDoor = !!visit.ac_visitor_id || !!visit.door_code;
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Revoke access</h2>
+        <p className="muted">You are about to revoke {who}.</p>
+
+        <div className="revoke-effects">
+          <p className="muted small">This will always:</p>
+          <ul className="muted small">
+            <li>Mark the visit as Revoked</li>
+            <li>Remove website access (www.goddijn.net)</li>
+          </ul>
+        </div>
+
+        {hasDoor ? (
+          <>
+            <p className="modal-label">Door access (2N PIN):</p>
+            <div className="revoke-options">
+              <button
+                className="revoke-option"
+                onClick={() => onConfirm(false)}
+              >
+                <strong>Deactivate PIN, keep visitor</strong>
+                <span className="muted small">PIN stops working now. Visitor stays in 2N for quick re-extension next time.</span>
+              </button>
+              <button
+                className="revoke-option revoke-option-danger"
+                onClick={() => onConfirm(true)}
+              >
+                <strong>Delete visitor entirely</strong>
+                <span className="muted small">PIN is gone. A new visitor + PIN will be created next time they visit.</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <button className="revoke-option" onClick={() => onConfirm(false)}>
+            <strong>Confirm revoke</strong>
+            <span className="muted small">No door access to clean up.</span>
+          </button>
+        )}
+
+        <button className="link modal-cancel" onClick={onCancel}>Cancel</button>
+      </div>
     </div>
   );
 }

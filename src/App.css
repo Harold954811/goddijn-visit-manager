@@ -253,3 +253,68 @@ button.link {
   gap: 8px;
   margin-bottom: 16px;
 }
+
+/* Revoke modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.modal {
+  background: #171a21;
+  border: 1px solid #262b36;
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 420px;
+  width: 100%;
+}
+.modal h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+.modal-label {
+  font-size: 0.85rem;
+  color: #a7adba;
+  margin: 16px 0 8px;
+}
+.revoke-effects ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.revoke-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.revoke-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid #313846;
+  border-radius: 8px;
+  background: #0f1115;
+  color: #eaeaea;
+  cursor: pointer;
+  width: 100%;
+  font-size: 0.9rem;
+}
+.revoke-option:hover {
+  border-color: #3b82f6;
+}
+.revoke-option-danger:hover {
+  border-color: #f27272;
+}
+.revoke-option strong { font-size: 0.92rem; }
+.revoke-option span { font-size: 0.78rem; }
+.modal-cancel {
+  display: block;
+  margin: 16px auto 0;
+  text-align: center;
+}
