@@ -504,6 +504,9 @@ function VisitsList({ session, houses, refreshKey }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      if (data.twoNError) {
+        window.alert(`Visit revoked in the app, but the 2N door update failed: ${data.twoNError}\n\nThe visitor's PIN may still be active. You may need to adjust it manually in the 2N Access Commander console.`);
+      }
       await load();
     } catch (err) {
       window.alert(`Could not revoke: ${err.message}`);

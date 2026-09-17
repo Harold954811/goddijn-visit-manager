@@ -49,7 +49,9 @@ async function revokeOneVisit(id, token, delete2NVisitor = false) {
 
   // Handle the 2N visitor: delete entirely, or deactivate (set VisitTo to now)
   // so the PIN stops working but the visitor record remains for future re-extension.
-  // Non-fatal: if 2N fails, the visit is still revoked in Directus and Cloudflare.
+  // If 2N fails, the visit is still revoked in Directus and Cloudflare, but we
+  // surface the error to the user so they know the door PIN may still be active.
+  let twoNError = null;
   if (visit.ac_visitor_id) {
     try {
       if (delete2NVisitor) {
@@ -58,7 +60,8 @@ async function revokeOneVisit(id, token, delete2NVisitor = false) {
         await deactivateVisitor(visit.ac_visitor_id);
       }
     } catch (err) {
-      console.error("2N visitor handling failed (non-fatal):", err);
+      console.error("2N visitor handling failed:", err);
+      twoNError = err.message;
     }
   }
 
@@ -80,6 +83,8 @@ async function revokeOneVisit(id, token, delete2NVisitor = false) {
   // Always revoke the live Cloudflare session (forces fresh login)
   await revokeCloudflareSession(visit.guest_email);
 
+  // Return the 2N error if any, so the caller can surface it to the user
+  visit._twoNError = twoNError;
   return visit;
 }
 
@@ -127,7 +132,7 @@ export default async function handler(req, res) {
         res.status(404).json({ error: "Visit not found" });
         return;
       }
-      res.status(200).json({ ok: true, revoked: 1 });
+      res.status(200).json({ ok: true, revoked: 1, twoNError: visit._twoNError || null });
     } else {
       res.status(400).json({ error: "Missing visit id or visit group id" });
       return;
