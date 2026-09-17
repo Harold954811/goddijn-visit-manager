@@ -428,7 +428,7 @@ function VisitForm({ session, houses, onCreated }) {
 
         {visitType === "house" && (
           <button type="button" className="link add-guest-btn" onClick={addGuest}>
-            + Add another guest (family visit)
+            + Add another guest in the same group
           </button>
         )}
 
