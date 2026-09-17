@@ -346,18 +346,137 @@ button.link {
 .autocomplete-dropdown li:hover { background: #262b36; }
 .autocomplete-dropdown li.active { background: rgba(59,130,246,0.15); }
 
-/* Debug panel */
-.debug-panel {
-  margin-bottom: 16px;
-  padding: 12px;
-  background: #0a0c10;
+/* Debug panel — removed in cleanup, keep class for safety */
+.debug-panel { display: none; }
+
+/* Visit type cards */
+.visit-type-cards {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.visit-type-card {
+  flex: 1;
+  padding: 16px 14px;
   border: 1px solid #313846;
+  border-radius: 10px;
+  background: #0f1115;
+  color: #eaeaea;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.visit-type-card:hover { border-color: #4a5568; }
+.visit-type-card.selected {
+  border-color: #3b82f6;
+  background: rgba(59,130,246,0.08);
+}
+.visit-type-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.visit-type-card-desc {
+  font-size: 0.78rem;
+  color: #a7adba;
+  line-height: 1.35;
+}
+
+/* Property selector */
+.property-selector {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.property-chip {
+  padding: 8px 16px;
+  border: 1px solid #313846;
+  border-radius: 999px;
+  background: #0f1115;
+  color: #a7adba;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+.property-chip:hover { border-color: #4a5568; color: #eaeaea; }
+.property-chip.selected {
+  border-color: #3b82f6;
+  color: #3b82f6;
+  background: rgba(59,130,246,0.08);
+}
+
+/* Email preview */
+.email-preview {
+  margin-bottom: 16px;
+}
+.email-preview summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #8ea3c7;
+  padding: 8px 0;
+}
+.email-preview-body {
+  margin-top: 8px;
+  padding: 14px;
+  background: #0a0c10;
+  border: 1px solid #262b36;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: #c4cad6;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.email-preview-body strong { color: #eaeaea; }
+
+/* Calendar checkbox */
+.calendar-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #a7adba;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: #0f1115;
+  border: 1px solid #262b36;
   border-radius: 8px;
 }
-.debug-pre {
-  font-size: 0.75rem;
-  color: #8ea3c7;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 4px 0 0;
+.calendar-checkbox input { width: auto; margin: 0; }
+
+/* Sticky submit on mobile */
+.sticky-submit {
+  position: sticky;
+  bottom: 0;
+  background: #171a21;
+  padding: 12px 0 4px;
+  z-index: 10;
+  margin-top: 8px;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  .page { padding: 12px 10px; }
+  .page-inner { max-width: 100%; }
+  .card { padding: 20px 16px; max-width: 100%; border-radius: 10px; }
+  .card.wide { padding: 16px 12px; }
+  .header-row { margin-bottom: 14px; }
+  h1 { font-size: 1.15rem; }
+  .tab-row { gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab { padding: 7px 12px; font-size: 0.8rem; }
+  form input, form select, form textarea { padding: 11px 12px; font-size: 1rem; }
+  form label { margin-bottom: 12px; }
+  .date-row { flex-direction: column; gap: 12px; }
+  .visit-type-cards { flex-direction: column; }
+  .property-selector { gap: 8px; }
+  .property-chip { padding: 10px 18px; font-size: 0.9rem; }
+  .edit-grid { grid-template-columns: 1fr; }
+  .visits-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .visits-table th, .visits-table td { font-size: 0.82rem; padding: 8px 8px; }
+  .creds-summary { flex-wrap: wrap; gap: 6px; }
+  .modal { padding: 22px 18px; max-width: 100%; }
+  .revoke-option { padding: 14px; }
+  .sticky-submit { padding: 10px 0 2px; }
+  button[type="submit"], button:not(.link) { padding: 13px; font-size: 1rem; }
 }

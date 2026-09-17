@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
-import { houseOptions as staticHouseOptions } from "./houses";
+import { houseOptions as staticHouseOptions, PROPERTIES } from "./houses";
 
 const STATIC_HOUSES = staticHouseOptions();
 const STATUSES = ["Draft", "Sent", "Active", "Expired", "Revoked"];
@@ -126,10 +126,16 @@ function Dashboard({ session, houses }) {
 }
 
 function VisitForm({ session, houses, onCreated }) {
+  // Visit type: "day" or "house"
+  const [visitType, setVisitType] = useState("house");
+
   // Guest list: each entry is { guestName, guestEmail, websiteAccess }
   const [guests, setGuests] = useState([
     { guestName: "", guestEmail: "", websiteAccess: true },
   ]);
+
+  // Destination: property first, then optional house within that property
+  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
   const [house, setHouse] = useState(houses[0]?.matchHouse ?? "");
   const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState(todayISO());
@@ -138,6 +144,7 @@ function VisitForm({ session, houses, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [templates, setTemplates] = useState([]);
+  const [calendarAdd, setCalendarAdd] = useState(false);
 
   // Fetch email templates on mount
   useEffect(() => {
@@ -157,7 +164,7 @@ function VisitForm({ session, houses, onCreated }) {
 
   // All 2N visitors for name autocomplete — fetched once on mount
   const [allVisitors, setAllVisitors] = useState([]);
-  const [nameSuggestions, setNameSuggestions] = useState([]); // filtered matches for the first guest's name field
+  const [nameSuggestions, setNameSuggestions] = useState([]);
   const [nameActiveSuggestion, setNameActiveSuggestion] = useState(-1);
 
   useEffect(() => {
@@ -165,13 +172,18 @@ function VisitForm({ session, houses, onCreated }) {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (data?.visitors) setAllVisitors(data.visitors); else console.warn("2n-visitors returned no visitors:", data); })
-      .catch((err) => console.error("2n-visitors fetch failed:", err));
+      .then((data) => { if (data?.visitors) setAllVisitors(data.visitors); })
+      .catch(() => {});
   }, [session]);
+
+  // The selected template object (for preview)
+  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) || null;
+  const defaultTemplateType = visitType === "day" ? "door_only" : "invitation";
+  const fallbackTemplate = templates.find((t) => t.template_type === defaultTemplateType && t.is_default) || null;
+  const previewTemplate = selectedTemplate || fallbackTemplate;
 
   function updateGuest(index, field, value) {
     setGuests((prev) => prev.map((g, i) => (i === index ? { ...g, [field]: value } : g)));
-    // Name autocomplete for the first guest
     if (index === 0 && field === "guestName") {
       const q = value.trim().toLowerCase();
       if (q.length >= 1) {
@@ -195,11 +207,60 @@ function VisitForm({ session, houses, onCreated }) {
   }
 
   function addGuest() {
-    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: true }]);
+    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: visitType !== "day" }]);
   }
 
   function removeGuest(index) {
     setGuests((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function selectVisitType(type) {
+    setVisitType(type);
+    if (type === "day") {
+      const today = todayISO();
+      setStartDate(today);
+      setEndDate(today);
+      setGuests((prev) => prev.map((g) => ({ ...g, websiteAccess: false })));
+      setSelectedPropertyId(null);
+    } else {
+      setGuests((prev) => prev.map((g) => ({ ...g, websiteAccess: true })));
+      setSelectedPropertyId(null);
+    }
+  }
+
+  function selectProperty(propId) {
+    setSelectedPropertyId(propId);
+    const prop = PROPERTIES.find((p) => p.id === propId);
+    if (!prop) return;
+    if (visitType === "day") {
+      // Day visitor: house = domain name (e.g. "Loveland", "Castellas")
+      const domain = prop.domains[0];
+      const propertyName = prop.domains.length > 1 ? domain.name : prop.name;
+      setHouse(propertyName);
+    } else {
+      // House guest: auto-select first house in property
+      const firstHouse = prop.domains.flatMap((d) => d.houses)[0];
+      if (firstHouse) setHouse(firstHouse.matchHouse);
+    }
+  }
+
+  // For house-guest mode: houses available within the selected property
+  const propertyHouses = selectedPropertyId
+    ? PROPERTIES.find((p) => p.id === selectedPropertyId)?.domains.flatMap((d) =>
+        d.houses.map((h) => ({ ...h, domainLabel: d.name }))) || []
+    : [];
+
+  // Build property chips for the selector
+  // For Mougins, show Loveland and Castellas as separate options
+  const propertyChips = [];
+  for (const prop of PROPERTIES) {
+    if (prop.domains.length > 1) {
+      for (const domain of prop.domains) {
+        propertyChips.push({ id: `${prop.id}:${domain.id}`, label: domain.name, propId: prop.id });
+      }
+    } else {
+      propertyChips.push({ id: prop.id, label: prop.name, propId: prop.id });
+    }
   }
 
   function resetForm() {
@@ -208,6 +269,8 @@ function VisitForm({ session, houses, onCreated }) {
     setDoorCode("");
     setSelectedVisitorId(null);
     setSelectedTemplateId("");
+    setSelectedPropertyId(null);
+    setCalendarAdd(false);
   }
 
   async function handleSubmit(e) {
@@ -225,9 +288,10 @@ function VisitForm({ session, houses, onCreated }) {
           guests: guests.map((g) => ({
             guestName: g.guestName,
             guestEmail: g.guestEmail,
-            websiteAccess: g.websiteAccess,
+            websiteAccess: visitType === "day" ? false : g.websiteAccess,
           })),
           house, startDate, endDate, notes, doorCode,
+          visitType,
           templateId: selectedTemplateId || undefined,
           existingVisitorId: selectedVisitorId || undefined,
         }),
@@ -248,19 +312,48 @@ function VisitForm({ session, houses, onCreated }) {
     }
   }
 
-  const groupedHouses = [];
-  for (const h of houses) {
-    let group = groupedHouses.find((g) => g.label === h.groupLabel);
-    if (!group) {
-      group = { label: h.groupLabel, houses: [] };
-      groupedHouses.push(group);
-    }
-    group.houses.push(h);
+  // Render a simple email preview by replacing placeholders in the template body
+  function renderPreview(template) {
+    if (!template) return "No template selected.";
+    let body = template.body || "";
+    const firstGuest = guests[0] || {};
+    const replacements = {
+      guestName: firstGuest.guestName || "[guest name]",
+      house: houses.find((h) => h.matchHouse === house)?.name || house || "[house]",
+      doorCode: doorCode || "[auto-generated]",
+      startDate: startDate || "[arrival]",
+      endDate: endDate || "[departure]",
+      creatorName: session.user.user_metadata?.full_name || session.user.email || "[your name]",
+    };
+    body = body.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+      return key in replacements ? replacements[key] : match;
+    });
+    return body;
   }
 
   return (
     <div className="card">
       <form onSubmit={handleSubmit}>
+        {/* Visit type cards */}
+        <div className="visit-type-cards">
+          <button
+            type="button"
+            className={`visit-type-card ${visitType === "day" ? "selected" : ""}`}
+            onClick={() => selectVisitType("day")}
+          >
+            <div className="visit-type-card-title">Day Visitor</div>
+            <div className="visit-type-card-desc">Comes for the day. Door PIN only, no website access.</div>
+          </button>
+          <button
+            type="button"
+            className={`visit-type-card ${visitType === "house" ? "selected" : ""}`}
+            onClick={() => selectVisitType("house")}
+          >
+            <div className="visit-type-card-title">House Guest</div>
+            <div className="visit-type-card-desc">Stays overnight. Door PIN + website access for their house.</div>
+          </button>
+        </div>
+
         {/* Guest list */}
         {guests.map((g, idx) => (
           <div key={idx} className="guest-row">
@@ -323,48 +416,26 @@ function VisitForm({ session, houses, onCreated }) {
                 required
               />
             </label>
-            {idx === 0 && (
+            {visitType === "house" && (
               <label className="checkbox-label">
                 <input
                   type="checkbox"
                   checked={g.websiteAccess}
                   onChange={(e) => updateGuest(idx, "websiteAccess", e.target.checked)}
                 />
-                Website access (www.goddijn.net)
-              </label>
-            )}
-            {idx > 0 && (
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={g.websiteAccess}
-                  onChange={(e) => updateGuest(idx, "websiteAccess", e.target.checked)}
-                />
-                Website access
+                {idx === 0 ? "Website access (www.goddijn.net)" : "Website access"}
               </label>
             )}
           </div>
         ))}
 
-        <button type="button" className="link add-guest-btn" onClick={addGuest}>
-          + Add another guest (family visit)
-        </button>
+        {visitType === "house" && (
+          <button type="button" className="link add-guest-btn" onClick={addGuest}>
+            + Add another guest (family visit)
+          </button>
+        )}
 
-        <label>
-          House
-          <select value={house} onChange={(e) => setHouse(e.target.value)} required>
-            {groupedHouses.map((grp) => (
-              <optgroup key={grp.label} label={grp.label}>
-                {grp.houses.map((h) => (
-                  <option key={h.matchHouse} value={h.matchHouse}>
-                    {h.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
-
+        {/* Dates */}
         <div className="date-row">
           <label>
             Arrival
@@ -381,6 +452,34 @@ function VisitForm({ session, houses, onCreated }) {
             />
           </label>
         </div>
+
+        {/* Destination: property chips, then optional house selector */}
+        <label>Which property</label>
+        <div className="property-selector">
+          {propertyChips.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              className={`property-chip ${selectedPropertyId === chip.propId ? "selected" : ""}`}
+              onClick={() => selectProperty(chip.propId)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+
+        {visitType === "house" && selectedPropertyId && propertyHouses.length > 1 && (
+          <label>
+            Which house
+            <select value={house} onChange={(e) => setHouse(e.target.value)} required>
+              {propertyHouses.map((h) => (
+                <option key={h.matchHouse} value={h.matchHouse}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label>
           Notes (optional, internal only)
@@ -409,7 +508,7 @@ function VisitForm({ session, houses, onCreated }) {
               value={selectedTemplateId}
               onChange={(e) => setSelectedTemplateId(e.target.value)}
             >
-              <option value="">Default (auto-selected)</option>
+              <option value="">Default for {visitType === "day" ? "day visitor" : "house guest"}</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}{t.is_default ? " (default)" : ""}
@@ -419,18 +518,45 @@ function VisitForm({ session, houses, onCreated }) {
           </label>
         )}
 
-        <button type="submit" disabled={submitting}>
-          {submitting
-            ? "Processing…"
-            : guests.length > 1
-            ? `Grant access & send invites (${guests.length} guests)`
-            : "Grant access & send invite"}
-        </button>
+        {/* Email preview */}
+        {previewTemplate && (
+          <details className="email-preview">
+            <summary>Preview email (subject: {previewTemplate.subject})</summary>
+            <div
+              className="email-preview-body"
+              dangerouslySetInnerHTML={{ __html: renderPreview(previewTemplate) }}
+            />
+          </details>
+        )}
+
+        {/* Calendar checkbox (placeholder) */}
+        <label className="calendar-checkbox">
+          <input
+            type="checkbox"
+            checked={calendarAdd}
+            onChange={(e) => setCalendarAdd(e.target.checked)}
+          />
+          Add this stay to the Calendar
+        </label>
+
+        <div className="sticky-submit">
+          <button type="submit" disabled={submitting}>
+            {submitting
+              ? "Processing…"
+              : visitType === "day"
+              ? "Send day visitor invite"
+              : guests.length > 1
+              ? `Send house guest invites (${guests.length} guests)`
+              : "Send house guest invite"}
+          </button>
+        </div>
       </form>
 
       {result?.ok && (
         <p className="success">
-          {result.count > 1
+          {visitType === "day"
+            ? <>Done — the day visitor's entry code and address are on their way by email.</>
+            : result.count > 1
             ? <>Done — {result.count} guests processed. Each receives their own PIN and invitation email.</>
             : <>Done — the guest can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>}
         </p>

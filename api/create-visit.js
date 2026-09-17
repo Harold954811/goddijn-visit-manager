@@ -353,7 +353,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { guests: guestsInput, house, startDate, endDate, notes, doorCode, templateId, existingVisitorId } = req.body || {};
+  const { guests: guestsInput, house, startDate, endDate, notes, doorCode, templateId, existingVisitorId, visitType } = req.body || {};
 
   // Support both new multi-guest format (guests array) and legacy
   // single-guest format (guestName/guestEmail) for backward compatibility.
@@ -406,14 +406,34 @@ export default async function handler(req, res) {
   const visitGroupId = crypto.randomUUID();
 
   // Fetch the email template. If templateId is provided, use it; otherwise
-  // fall back to the default for the visit type (invitation or door_only).
-  const allDoorOnly = guests.every((g) => g.websiteAccess === false);
-  const defaultTemplateType = allDoorOnly ? "door_only" : "invitation";
+  // fall back to the default for the visit type.
+  const isDayVisit = visitType === "day" || guests.every((g) => g.websiteAccess === false);
+  const defaultTemplateType = isDayVisit ? "door_only" : "invitation";
   let template = null;
   try {
     template = await getTemplate(templateId, defaultTemplateType, process.env.DIRECTUS_VISIT_MANAGER_TOKEN);
   } catch (err) {
     console.error("Failed to fetch email template (non-fatal, will use hardcoded fallback):", err);
+  }
+
+  // Fetch address and directions for the house/property from Directus
+  // (used by day-visitor email templates with {{address}} and {{directions}})
+  let houseAddress = null;
+  let houseDirections = null;
+  try {
+    const addrRes = await fetch(
+      `${DIRECTUS}/items/gd_houses?filter[house][_eq]=${encodeURIComponent(house)}&fields=house,address,directions&limit=1`,
+      { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
+    );
+    if (addrRes.ok) {
+      const addrData = await addrRes.json();
+      if (addrData?.data?.[0]) {
+        houseAddress = addrData.data[0].address || null;
+        houseDirections = addrData.data[0].directions || null;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch house address (non-fatal):", err);
   }
 
   try {
@@ -497,9 +517,12 @@ export default async function handler(req, res) {
           guestName: g.guestName,
           guestEmail: normalizedEmail,
           houseName: house,
+          house,
           startDate, endDate,
           doorCode: effectiveDoorCode,
           creatorName: creator.name,
+          address: houseAddress || "",
+          directions: houseDirections || "",
         });
         await sendTemplatedEmail({ creator, guestEmail: normalizedEmail, subject, html });
       } else {
