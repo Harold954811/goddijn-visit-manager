@@ -203,7 +203,7 @@ function VisitForm({ session, houses, onCreated }) {
   }
 
   function addGuest() {
-    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: false }]);
+    setGuests((prev) => [...prev, { guestName: "", guestEmail: "", websiteAccess: prev[0]?.websiteAccess || false }]);
   }
 
   function removeGuest(index) {
@@ -508,7 +508,7 @@ function VisitForm({ session, houses, onCreated }) {
             <input
               type="checkbox"
               checked={guests[0]?.websiteAccess || false}
-              onChange={(e) => setGuests((prev) => prev.map((g, i) => (i === 0 ? { ...g, websiteAccess: e.target.checked } : g)))}
+              onChange={(e) => setGuests((prev) => prev.map((g) => ({ ...g, websiteAccess: e.target.checked })))}
             />
             Website access (www.goddijn.net)
           </label>
