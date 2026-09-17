@@ -526,8 +526,8 @@ function VisitForm({ session, houses, onCreated }) {
           </label>
         )}
 
-        {/* Email preview */}
-        {previewTemplate && (
+        {/* Email preview — hidden for now, can be re-enabled later */}
+        {false && previewTemplate && (
           <details className="email-preview">
             <summary>Preview email (subject: {previewTemplate.subject})</summary>
             <div
