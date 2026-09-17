@@ -165,8 +165,8 @@ function VisitForm({ session, houses, onCreated }) {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (data?.visitors) setAllVisitors(data.visitors); })
-      .catch(() => {});
+      .then((data) => { if (data?.visitors) setAllVisitors(data.visitors); else console.warn("2n-visitors returned no visitors:", data); })
+      .catch((err) => console.error("2n-visitors fetch failed:", err));
   }, [session]);
 
   function updateGuest(index, field, value) {

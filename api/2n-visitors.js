@@ -30,8 +30,27 @@ export default async function handler(req, res) {
     }
     const data = await acRes.json();
 
-    // Normalize: 2N may return an array directly or wrapped.
-    const raw = Array.isArray(data) ? data : data.data || data.Result || [];
+    // Normalize: 2N may return an array directly or wrapped in various shapes.
+    // Try all known wrappers; fall back to empty array.
+    let raw;
+    if (Array.isArray(data)) {
+      raw = data;
+    } else if (Array.isArray(data.data)) {
+      raw = data.data;
+    } else if (Array.isArray(data.Result)) {
+      raw = data.Result;
+    } else if (Array.isArray(data.Visitors)) {
+      raw = data.Visitors;
+    } else if (Array.isArray(data.visitors)) {
+      raw = data.visitors;
+    } else if (data && typeof data === "object" && data.id) {
+      // Single visitor object returned directly
+      raw = [data];
+    } else {
+      // Unknown shape — log it so we can fix the normalization
+      console.error("2N visitors response shape unknown:", JSON.stringify(data).slice(0, 500));
+      raw = [];
+    }
 
     // Map to a consistent shape with camelCase keys for the frontend.
     const visitors = raw.map((v) => ({
