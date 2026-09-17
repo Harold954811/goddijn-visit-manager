@@ -403,7 +403,7 @@ function VisitForm({ session, houses, onCreated }) {
         <div className="date-row">
           <label>
             Arrival
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setEndDate(e.target.value); }} required />
           </label>
           <label>
             Departure
