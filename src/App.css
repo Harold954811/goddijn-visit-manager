@@ -360,16 +360,17 @@ button.link {
   padding: 16px 14px;
   border: 1px solid #313846;
   border-radius: 10px;
-  background: #0f1115;
+  background: #0f1115 !important;
   color: #eaeaea;
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s, background 0.15s;
+  width: auto;
 }
 .visit-type-card:hover { border-color: #4a5568; }
 .visit-type-card.selected {
   border-color: #3b82f6;
-  background: #3b82f6;
+  background: #3b82f6 !important;
   color: white;
 }
 .visit-type-card.selected .visit-type-card-title { color: white; }
