@@ -373,7 +373,7 @@ function VisitForm({ session, houses, onCreated }) {
               </div>
             )}
             <label className="autocomplete-label">
-              {idx === 0 ? "Guest name" : ""}
+              Guest name
               <input
                 value={g.guestName}
                 onChange={(e) => updateGuest(idx, "guestName", e.target.value)}
@@ -415,7 +415,7 @@ function VisitForm({ session, houses, onCreated }) {
               )}
             </label>
             <label>
-              {idx === 0 ? "Guest email" : ""}
+              Guest email
               <input
                 type="email"
                 value={g.guestEmail}
