@@ -223,14 +223,47 @@ function VisitForm({ session, houses, onCreated }) {
     const prop = PROPERTIES.find((p) => p.id === propId);
     if (!prop) return;
     if (visitType === "day") {
-      // Day visitor: house = property name (e.g. "Mougins")
-      setHouse(prop.name);
+      // Day visitor: if property has one domain, use the first house's
+      // matchHouse (so the server can resolve the 2N group). The UI shows
+      // the property name, but we send a real house name.
+      if (prop.domains.length === 1) {
+        const firstHouse = prop.domains[0].houses[0];
+        if (firstHouse) setHouse(firstHouse.matchHouse);
+      } else {
+        // Multi-domain (Mougins): don't auto-select, show estate selector
+        setHouse("");
+      }
     } else {
       // House guest: auto-select first house
       const firstHouse = prop.domains.flatMap((d) => d.houses)[0];
       if (firstHouse) setHouse(firstHouse.matchHouse);
     }
   }
+
+  // For day visitors at multi-domain properties (Mougins): show domain selector.
+  // When a domain is selected, set house to the first house in that domain
+  // (the server resolves the 2N group from it). The UI label shows the domain name.
+  const propertyDomains = selectedPropertyId
+    ? PROPERTIES.find((p) => p.id === selectedPropertyId)?.domains || []
+    : [];
+
+  function selectDomain(domainId) {
+    const prop = PROPERTIES.find((p) => p.id === selectedPropertyId);
+    const domain = prop?.domains.find((d) => d.id === domainId);
+    if (domain?.houses?.[0]) {
+      setHouse(domain.houses[0].matchHouse);
+    }
+  }
+
+  // Get the domain name for display from the currently selected house
+  const selectedDomainName = (() => {
+    if (!selectedPropertyId || !house) return "";
+    const prop = PROPERTIES.find((p) => p.id === selectedPropertyId);
+    for (const d of prop?.domains || []) {
+      if (d.houses.some((h) => h.matchHouse === house)) return d.name;
+    }
+    return "";
+  })();
 
   // Houses available within the selected property (for house guest mode)
   const propertyHouses = selectedPropertyId
@@ -440,6 +473,25 @@ function VisitForm({ session, houses, onCreated }) {
                 <option key={h.matchHouse} value={h.matchHouse}>
                   {h.name}
                 </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {visitType === "day" && selectedPropertyId && propertyDomains.length > 1 && (
+          <label>
+            Which estate
+            <select
+              value={selectedDomainName || ""}
+              onChange={(e) => {
+                const domain = propertyDomains.find((d) => d.name === e.target.value);
+                if (domain) selectDomain(domain.id);
+              }}
+              required
+            >
+              <option value="">Select an estate</option>
+              {propertyDomains.map((d) => (
+                <option key={d.id} value={d.name}>{d.name}</option>
               ))}
             </select>
           </label>

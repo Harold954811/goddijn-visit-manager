@@ -196,7 +196,7 @@ async function createDirectusVisit({ guestName, guestEmail, house, startDate, en
     body: JSON.stringify({
       guest_name: guestName,
       guest_email: guestEmail,
-      visit_type: "Multi-day stay",
+      visit_type: visitType === "day" ? "Day visit" : "Multi-day stay",
       house,
       start_date: `${startDate}T00:00:00.000Z`,
       end_date: `${endDate}T23:59:59.000Z`,
