@@ -155,8 +155,43 @@ function VisitForm({ session, houses, onCreated }) {
   const [extendMode, setExtendMode] = useState(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
+  // All 2N visitors for name autocomplete — fetched once on mount
+  const [allVisitors, setAllVisitors] = useState([]);
+  const [nameSuggestions, setNameSuggestions] = useState([]); // filtered matches for the first guest's name field
+  const [nameActiveSuggestion, setNameActiveSuggestion] = useState(-1);
+
+  useEffect(() => {
+    fetch("/api/2n-visitors", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.visitors) setAllVisitors(data.visitors); })
+      .catch(() => {});
+  }, [session]);
+
   function updateGuest(index, field, value) {
     setGuests((prev) => prev.map((g, i) => (i === index ? { ...g, [field]: value } : g)));
+    // Name autocomplete for the first guest
+    if (index === 0 && field === "guestName") {
+      const q = value.trim().toLowerCase();
+      if (q.length >= 1) {
+        const matches = allVisitors
+          .filter((v) => v.name && v.name.toLowerCase().includes(q))
+          .slice(0, 6);
+        setNameSuggestions(matches);
+        setNameActiveSuggestion(-1);
+      } else {
+        setNameSuggestions([]);
+        setNameActiveSuggestion(-1);
+      }
+    }
+  }
+
+  function selectVisitorSuggestion(v) {
+    setGuests((prev) => prev.map((g, i) => (i === 0 ? { ...g, guestName: v.name || "", guestEmail: v.email || "" } : g)));
+    setNameSuggestions([]);
+    setNameActiveSuggestion(-1);
+    if (v.email) lookupGuestByEmail(v.email);
   }
 
   function addGuest() {
@@ -282,13 +317,47 @@ function VisitForm({ session, houses, onCreated }) {
                 </button>
               </div>
             )}
-            <label>
+            <label className="autocomplete-label">
               {idx === 0 ? "Guest name" : ""}
               <input
                 value={g.guestName}
                 onChange={(e) => updateGuest(idx, "guestName", e.target.value)}
+                onBlur={() => setTimeout(() => idx === 0 && setNameSuggestions([]), 200)}
+                onKeyDown={(e) => {
+                  if (idx === 0 && nameSuggestions.length > 0) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setNameActiveSuggestion((p) => Math.min(p + 1, nameSuggestions.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setNameActiveSuggestion((p) => Math.max(p - 1, -1));
+                    } else if (e.key === "Enter" && nameActiveSuggestion >= 0) {
+                      e.preventDefault();
+                      selectVisitorSuggestion(nameSuggestions[nameActiveSuggestion]);
+                    }
+                  }
+                }}
                 required
               />
+              {idx === 0 && nameSuggestions.length > 0 && (
+                <ul className="autocomplete-dropdown">
+                  {nameSuggestions.map((v, si) => (
+                    <li
+                      key={v.id}
+                      className={si === nameActiveSuggestion ? "active" : ""}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectVisitorSuggestion(v);
+                      }}
+                    >
+                      <strong>{v.name}</strong>
+                      {v.email && <span className="muted small"> · {v.email}</span>}
+                      {v.pin && <span className="muted small"> · PIN {v.pin}</span>}
+                      {v.visitTo && <span className="muted small"> · until {v.visitTo.slice(0, 10)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </label>
             <label>
               {idx === 0 ? "Guest email" : ""}
