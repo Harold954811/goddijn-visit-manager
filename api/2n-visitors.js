@@ -43,6 +43,8 @@ export default async function handler(req, res) {
       raw = data.Visitors;
     } else if (Array.isArray(data.visitors)) {
       raw = data.visitors;
+    } else if (Array.isArray(data.items)) {
+      raw = data.items;
     } else if (data && typeof data === "object" && data.id) {
       // Single visitor object returned directly
       raw = [data];
