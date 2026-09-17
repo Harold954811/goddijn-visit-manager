@@ -4,6 +4,7 @@ import { houseOptions as staticHouseOptions } from "./houses";
 
 const STATIC_HOUSES = staticHouseOptions();
 const STATUSES = ["Draft", "Sent", "Active", "Expired", "Revoked"];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -128,29 +129,89 @@ function VisitForm({ session, houses, onCreated }) {
   const [notes, setNotes] = useState("");
   const [doorCode, setDoorCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState(null); // { ok: true } | { ok: false, message }
+  const [result, setResult] = useState(null);
+
+  // Existing-visitor lookup state (Phase 2)
+  // existingVisitors: null = not searched, [] = searched and none found, [...] = matches
+  const [existingVisitors, setExistingVisitors] = useState(null);
+  const [searching, setSearching] = useState(false);
+  // extendMode: null = not extending, visitorId = extending this visitor
+  const [extendMode, setExtendMode] = useState(null);
+
+  async function lookupGuestByEmail(email) {
+    if (!email || !EMAIL_RE.test(email.trim())) return;
+    setSearching(true);
+    setExistingVisitors(null);
+    try {
+      const res = await fetch("/api/2n-visitors", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      const matches = (data.visitors || []).filter(
+        (v) => v.email && v.email.toLowerCase() === email.trim().toLowerCase()
+      );
+      setExistingVisitors(matches);
+    } catch (err) {
+      // If the lookup fails, silently proceed as "no existing visitor"
+      setExistingVisitors([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function resetExtendMode() {
+    setExtendMode(null);
+    setExistingVisitors(null);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setSubmitting(true);
     setResult(null);
     try {
-      const res = await fetch("/api/create-visit", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-      setResult({ ok: true, guestEmail });
-      setGuestName("");
-      setGuestEmail("");
-      setNotes("");
-      setDoorCode("");
-      onCreated?.();
+      if (extendMode) {
+        // Extend path: call /api/extend-visit with the existing visitor ID
+        const res = await fetch("/api/extend-visit", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            visitorId: extendMode,
+            guestName, guestEmail, house, startDate, endDate, notes,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+        setResult({ ok: true, guestEmail, extended: true });
+        setGuestName("");
+        setGuestEmail("");
+        setNotes("");
+        setDoorCode("");
+        resetExtendMode();
+        onCreated?.();
+      } else {
+        // Create-new path: same as before
+        const res = await fetch("/api/create-visit", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+        setResult({ ok: true, guestEmail });
+        setGuestName("");
+        setGuestEmail("");
+        setNotes("");
+        setDoorCode("");
+        resetExtendMode();
+        onCreated?.();
+      }
     } catch (err) {
       setResult({ ok: false, message: err.message });
     } finally {
@@ -178,8 +239,45 @@ function VisitForm({ session, houses, onCreated }) {
 
         <label>
           Guest email
-          <input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} required />
+          <input
+            type="email"
+            value={guestEmail}
+            onChange={(e) => setGuestEmail(e.target.value)}
+            onBlur={(e) => lookupGuestByEmail(e.target.value)}
+            required
+          />
         </label>
+
+        {searching && <p className="muted small">Checking for existing door access…</p>}
+
+        {existingVisitors && existingVisitors.length > 0 && (
+          <div className="existing-visitor-panel">
+            <p className="muted small">This person already has access in 2N:</p>
+            {existingVisitors.map((v) => (
+              <div key={v.id} className={`visitor-match ${extendMode === v.id ? "selected" : ""}`}>
+                <span>
+                  PIN: <strong>{v.pin || "on file"}</strong>
+                  {v.visitTo && <> · valid until {v.visitTo.slice(0, 10)}</>}
+                  {v.groups?.length > 0 && <> · {v.groups.map((g) => g.name).join(", ")}</>}
+                </span>
+                {extendMode === v.id ? (
+                  <button type="button" className="link" onClick={() => setExtendMode(null)}>
+                    Cancel extend
+                  </button>
+                ) : (
+                  <button type="button" className="link" onClick={() => setExtendMode(v.id)}>
+                    Extend this visitor
+                  </button>
+                )}
+              </div>
+            ))}
+            <p className="muted small">
+              {extendMode
+                ? "Extending: the existing PIN stays the same, only the dates change."
+                : "Choose a visitor to extend, or submit to create a new one."}
+            </p>
+          </div>
+        )}
 
         <label>
           House
@@ -223,26 +321,30 @@ function VisitForm({ session, houses, onCreated }) {
           <input
             value={doorCode}
             onChange={(e) => setDoorCode(e.target.value)}
-            placeholder="Leave blank until you've generated one in 2N Access Commander"
+            placeholder="Leave blank to auto-generate via 2N Access Commander"
             maxLength={50}
           />
         </label>
         <p className="hint">
-          The 2N integration isn't automated yet — generate the code in 2N Access Commander yourself,
-          then paste it here. If you leave it blank, the invitation just won't mention a door code; you
-          can always add one later from the Edit screen.
+          If you leave this blank, a 6-digit PIN is generated automatically in 2N Access Commander.
+          Enter a code manually only if you want a specific one.
         </p>
 
         <button type="submit" disabled={submitting}>
-          {submitting ? "Granting access…" : "Grant access & send invite"}
+          {submitting
+            ? "Processing…"
+            : extendMode
+            ? "Extend access & send email"
+            : "Grant access & send invite"}
         </button>
       </form>
 
       {result?.ok && (
         <p className="success">
-          Done — {result.guestEmail || "the guest"} can now sign in at{" "}
-          <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation
-          email is on its way.
+          {result.extended
+            ? <>Done — {result.guestEmail || "the guest"}'s access has been extended. An email is on its way with the updated dates.</>
+            : <>Done — {result.guestEmail || "the guest"} can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>
+          }
         </p>
       )}
       {result && !result.ok && <p className="error">{result.message}</p>}
