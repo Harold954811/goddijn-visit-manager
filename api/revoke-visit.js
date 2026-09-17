@@ -153,7 +153,8 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { id, visitGroupId, deleteVisitor: delete2N } = req.body || {};
+  const { id, visitGroupId } = req.body || {};
+  const delete2N = req.body.deleteVisitor === true;
   const token = process.env.DIRECTUS_VISIT_MANAGER_TOKEN;
 
   try {
