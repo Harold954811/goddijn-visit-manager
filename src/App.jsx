@@ -471,7 +471,7 @@ function VisitForm({ session, houses, onCreated }) {
             <select value={house} onChange={(e) => setHouse(e.target.value)} required>
               {propertyHouses.map((h) => (
                 <option key={h.matchHouse} value={h.matchHouse}>
-                  {h.name}
+                  {h.domainLabel} — {h.name}
                 </option>
               ))}
             </select>
