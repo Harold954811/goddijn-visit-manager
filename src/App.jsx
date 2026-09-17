@@ -741,6 +741,7 @@ function CredentialsDashboard({ session, houses }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [rows, setRows] = useState([]);
+  const [debugInfo, setDebugInfo] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -755,6 +756,17 @@ function CredentialsDashboard({ session, houses }) {
       const visitorsData = await visitorsRes.json();
       const cfData = await cfRes.json();
       const visitsData = await visitsRes.json();
+
+      // If 2N visitors returned empty or errored, fetch debug info
+      if (!visitorsRes.ok || (visitorsData.visitors || []).length === 0) {
+        try {
+          const dbgRes = await fetch("/api/2n-debug", { headers: { Authorization: `Bearer ${session.access_token}` } });
+          const dbgData = await dbgRes.json();
+          setDebugInfo(dbgData);
+        } catch (e) {
+          setDebugInfo({ error: e.message });
+        }
+      }
 
       if (!visitorsRes.ok) throw new Error(visitorsData.error || "Failed to fetch 2N visitors");
       if (!cfRes.ok) throw new Error(cfData.error || "Failed to fetch Cloudflare guests");
@@ -834,6 +846,13 @@ function CredentialsDashboard({ session, houses }) {
         <span className="status-badge status-active">{activeWeb} website accesses</span>
         {expired > 0 && <span className="status-badge status-expired">{expired} expired</span>}
       </div>
+
+      {debugInfo && (
+        <div className="debug-panel">
+          <p className="muted small"><strong>2N API debug:</strong></p>
+          <pre className="debug-pre">{JSON.stringify(debugInfo, null, 2)}</pre>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <p className="muted">No credentials found.</p>

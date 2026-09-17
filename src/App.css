@@ -345,3 +345,19 @@ button.link {
 .autocomplete-dropdown li:last-child { border-bottom: none; }
 .autocomplete-dropdown li:hover { background: #262b36; }
 .autocomplete-dropdown li.active { background: rgba(59,130,246,0.15); }
+
+/* Debug panel */
+.debug-panel {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #0a0c10;
+  border: 1px solid #313846;
+  border-radius: 8px;
+}
+.debug-pre {
+  font-size: 0.75rem;
+  color: #8ea3c7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 4px 0 0;
+}
