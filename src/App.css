@@ -449,15 +449,20 @@ button.link {
 }
 .calendar-checkbox input { width: auto; margin: 0; }
 
-/* Sticky submit on mobile */
+/* Floating submit button — stays at bottom of viewport */
 .sticky-submit {
-  position: sticky;
+  position: fixed;
   bottom: 0;
+  left: 0;
+  right: 0;
   background: #171a21;
-  padding: 12px 0 4px;
-  z-index: 10;
-  margin-top: 8px;
+  padding: 10px 16px 12px;
+  z-index: 100;
+  margin-top: 0;
+  border-top: 1px solid #262b36;
 }
+/* Add bottom padding to the form so content doesn't hide behind the fixed button */
+form { padding-bottom: 70px; }
 
 /* Mobile responsive — compressed to fit one screen */
 @media (max-width: 640px) {
@@ -493,7 +498,8 @@ button.link {
   /* Calendar checkbox: minimal */
   .calendar-checkbox { padding: 6px 10px; margin-bottom: 8px; font-size: 0.8rem; }
   /* Sticky submit: minimal */
-  .sticky-submit { padding: 6px 0 2px; margin-top: 4px; }
+  .sticky-submit { padding: 8px 12px 10px; }
+  form { padding-bottom: 60px; }
   button[type="submit"], button:not(.link) { padding: 10px; font-size: 0.95rem; }
   /* Hint text: smaller */
   .hint { font-size: 0.72rem; margin: -4px 0 8px; }
