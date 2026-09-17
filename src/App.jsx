@@ -149,11 +149,11 @@ function VisitForm({ session, houses, onCreated }) {
       .catch(() => {});
   }, [session]);
 
-  // Existing-visitor lookup state (Phase 2) — applies to the first guest only
-  const [existingVisitors, setExistingVisitors] = useState(null);
-  const [searching, setSearching] = useState(false);
-  const [extendMode, setExtendMode] = useState(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+
+  // When a visitor is selected from the autocomplete dropdown, store their
+  // 2N visitor ID so the server can reuse their PIN instead of creating new.
+  const [selectedVisitorId, setSelectedVisitorId] = useState(null);
 
   // All 2N visitors for name autocomplete — fetched once on mount
   const [allVisitors, setAllVisitors] = useState([]);
@@ -191,7 +191,7 @@ function VisitForm({ session, houses, onCreated }) {
     setGuests((prev) => prev.map((g, i) => (i === 0 ? { ...g, guestName: v.name || "", guestEmail: v.email || "" } : g)));
     setNameSuggestions([]);
     setNameActiveSuggestion(-1);
-    if (v.email) lookupGuestByEmail(v.email);
+    setSelectedVisitorId(v.id);
   }
 
   function addGuest() {
@@ -202,33 +202,11 @@ function VisitForm({ session, houses, onCreated }) {
     setGuests((prev) => prev.filter((_, i) => i !== index));
   }
 
-  async function lookupGuestByEmail(email) {
-    if (!email || !EMAIL_RE.test(email.trim())) return;
-    setSearching(true);
-    setExistingVisitors(null);
-    try {
-      const res = await fetch("/api/2n-visitors", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-      const matches = (data.visitors || []).filter(
-        (v) => v.email && v.email.toLowerCase() === email.trim().toLowerCase()
-      );
-      setExistingVisitors(matches);
-    } catch (err) {
-      setExistingVisitors([]);
-    } finally {
-      setSearching(false);
-    }
-  }
-
   function resetForm() {
     setGuests([{ guestName: "", guestEmail: "", websiteAccess: true }]);
     setNotes("");
     setDoorCode("");
-    setExtendMode(null);
-    setExistingVisitors(null);
+    setSelectedVisitorId(null);
     setSelectedTemplateId("");
   }
 
@@ -237,55 +215,32 @@ function VisitForm({ session, houses, onCreated }) {
     setSubmitting(true);
     setResult(null);
     try {
-      if (extendMode && guests.length === 1) {
-        // Extend path: single guest extending an existing 2N visitor
-        const g = guests[0];
-        const res = await fetch("/api/extend-visit", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            visitorId: extendMode,
-            guestName: g.guestName, guestEmail: g.guestEmail,
-            house, startDate, endDate, notes,
+      const res = await fetch("/api/create-visit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          guests: guests.map((g) => ({
+            guestName: g.guestName,
+            guestEmail: g.guestEmail,
             websiteAccess: g.websiteAccess,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-        setResult({ ok: true, guestEmail: g.guestEmail, extended: true });
-        resetForm();
-        onCreated?.();
-      } else {
-        // Create-new path: send all guests to create-visit
-        const res = await fetch("/api/create-visit", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            guests: guests.map((g) => ({
-              guestName: g.guestName,
-              guestEmail: g.guestEmail,
-              websiteAccess: g.websiteAccess,
-            })),
-            house, startDate, endDate, notes, doorCode,
-            templateId: selectedTemplateId || undefined,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-        setResult({
-          ok: true,
-          count: data.results?.length || guests.length,
-          results: data.results,
-        });
-        resetForm();
-        onCreated?.();
-      }
+          })),
+          house, startDate, endDate, notes, doorCode,
+          templateId: selectedTemplateId || undefined,
+          existingVisitorId: selectedVisitorId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      setResult({
+        ok: true,
+        count: data.results?.length || guests.length,
+        results: data.results,
+      });
+      resetForm();
+      onCreated?.();
     } catch (err) {
       setResult({ ok: false, message: err.message });
     } finally {
@@ -365,7 +320,6 @@ function VisitForm({ session, houses, onCreated }) {
                 type="email"
                 value={g.guestEmail}
                 onChange={(e) => updateGuest(idx, "guestEmail", e.target.value)}
-                onBlur={(e) => idx === 0 && lookupGuestByEmail(e.target.value)}
                 required
               />
             </label>
@@ -392,42 +346,9 @@ function VisitForm({ session, houses, onCreated }) {
           </div>
         ))}
 
-        {guests.length === 1 && searching && <p className="muted small">Checking for existing door access…</p>}
-
-        {guests.length === 1 && existingVisitors && existingVisitors.length > 0 && (
-          <div className="existing-visitor-panel">
-            <p className="muted small">This person already has access in 2N:</p>
-            {existingVisitors.map((v) => (
-              <div key={v.id} className={`visitor-match ${extendMode === v.id ? "selected" : ""}`}>
-                <span>
-                  PIN: <strong>{v.pin || "on file"}</strong>
-                  {v.visitTo && <> · valid until {v.visitTo.slice(0, 10)}</>}
-                  {v.groups?.length > 0 && <> · {v.groups.map((gr) => gr.name).join(", ")}</>}
-                </span>
-                {extendMode === v.id ? (
-                  <button type="button" className="link" onClick={() => setExtendMode(null)}>
-                    Cancel extend
-                  </button>
-                ) : (
-                  <button type="button" className="link" onClick={() => setExtendMode(v.id)}>
-                    Extend this visitor
-                  </button>
-                )}
-              </div>
-            ))}
-            <p className="muted small">
-              {extendMode
-                ? "Extending: the existing PIN stays the same, only the dates change."
-                : "Choose a visitor to extend, or submit to create a new one."}
-            </p>
-          </div>
-        )}
-
-        {!extendMode && (
-          <button type="button" className="link add-guest-btn" onClick={addGuest}>
-            + Add another guest (family visit)
-          </button>
-        )}
+        <button type="button" className="link add-guest-btn" onClick={addGuest}>
+          + Add another guest (family visit)
+        </button>
 
         <label>
           House
@@ -481,7 +402,7 @@ function VisitForm({ session, houses, onCreated }) {
             : `If you leave the door code blank, a 6-digit PIN is generated automatically via 2N Access Commander.`}
         </p>
 
-        {templates.length > 0 && !extendMode && (
+        {templates.length > 0 && (
           <label>
             Email template
             <select
@@ -501,8 +422,6 @@ function VisitForm({ session, houses, onCreated }) {
         <button type="submit" disabled={submitting}>
           {submitting
             ? "Processing…"
-            : extendMode
-            ? "Extend access & send email"
             : guests.length > 1
             ? `Grant access & send invites (${guests.length} guests)`
             : "Grant access & send invite"}
@@ -511,12 +430,9 @@ function VisitForm({ session, houses, onCreated }) {
 
       {result?.ok && (
         <p className="success">
-          {result.extended
-            ? <>Done — {result.guestEmail || "the guest"}'s access has been extended. An email is on its way with the updated dates.</>
-            : result.count > 1
+          {result.count > 1
             ? <>Done — {result.count} guests processed. Each receives their own PIN and invitation email.</>
-            : <>Done — the guest can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>
-          }
+            : <>Done — the guest can now sign in at <a href="https://www.goddijn.net">www.goddijn.net</a> for the dates given, and an invitation email is on its way.</>}
         </p>
       )}
       {result && !result.ok && <p className="error">{result.message}</p>}

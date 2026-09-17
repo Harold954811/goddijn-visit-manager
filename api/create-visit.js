@@ -27,7 +27,7 @@
 //   CLOUDFLARE_ACCESS_TOKEN           -- Access: Apps and Policies edit, scoped to one account
 //   RESEND_API_KEY                    -- sending access on the goddijn.net domain
 
-import { createVisitor } from "../lib/2n.js";
+import { createVisitor, getVisitorById, deleteVisitor } from "../lib/2n.js";
 import { getTemplate, renderTemplate } from "../lib/email.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
@@ -353,7 +353,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { guests: guestsInput, house, startDate, endDate, notes, doorCode, templateId } = req.body || {};
+  const { guests: guestsInput, house, startDate, endDate, notes, doorCode, templateId, existingVisitorId } = req.body || {};
 
   // Support both new multi-guest format (guests array) and legacy
   // single-guest format (guestName/guestEmail) for backward compatibility.
@@ -418,7 +418,8 @@ export default async function handler(req, res) {
 
   try {
     const results = [];
-    for (const g of guests) {
+    for (let idx = 0; idx < guests.length; idx++) {
+      const g = guests[idx];
       const normalizedEmail = g.guestEmail.trim().toLowerCase();
       const giveWebsiteAccess = g.websiteAccess !== false;
 
@@ -438,13 +439,42 @@ export default async function handler(req, res) {
       let effectiveDoorCode = doorCode;
       let visitorId = null;
       try {
-        const result = await provisionDoorCode({
-          guestName: g.guestName, guestEmail: normalizedEmail,
-          startDate, endDate, doorCode, twoNGroupId,
-        });
-        if (result) {
-          effectiveDoorCode = result.pin;
-          visitorId = result.visitorId;
+        if (existingVisitorId && idx === 0) {
+          // Reuse existing visitor: get their PIN, delete, recreate with same PIN
+          const existing = await getVisitorById(existingVisitorId);
+          const existingPin = existing?.pin || null;
+          try { await deleteVisitor(existingVisitorId); } catch (e) { /* non-fatal */ }
+          if (existingPin && twoNGroupId) {
+            const result = await createVisitor({
+              guestName: g.guestName, guestEmail: normalizedEmail,
+              startDate, endDate, twoNGroupId, pin: existingPin,
+            });
+            if (result) {
+              effectiveDoorCode = result.pin;
+              visitorId = result.visitorId;
+            }
+          } else if (!doorCode) {
+            // No PIN to reuse or no 2N group — fall back to normal provisioning
+            const result = await createVisitor({
+              guestName: g.guestName, guestEmail: normalizedEmail,
+              startDate, endDate, twoNGroupId,
+            });
+            if (result) {
+              effectiveDoorCode = result.pin;
+              visitorId = result.visitorId;
+            }
+          }
+        } else {
+          const result = await provisionDoorCode({
+            guestName: g.guestName, guestEmail: normalizedEmail,
+            startDate, endDate, doorCode, twoNGroupId,
+          });
+          if (result) {
+            effectiveDoorCode = result.pin;
+            visitorId = result.visitorId;
+          }
+        }
+        if (visitorId) {
           await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(visit?.data?.id)}`, {
             method: "PATCH",
             headers: {
@@ -452,8 +482,8 @@ export default async function handler(req, res) {
               Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}`,
             },
             body: JSON.stringify({
-              door_code: result.pin,
-              ac_visitor_id: result.visitorId,
+              door_code: effectiveDoorCode,
+              ac_visitor_id: visitorId,
             }),
           });
         }
