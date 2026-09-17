@@ -98,14 +98,14 @@ async function fetchHousesMap() {
   }
   try {
     const res = await fetch(
-      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house,two_n_group_id&sort=sort`,
+      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house,two_n_group_id,location,domain&sort=sort`,
       { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
     );
     if (!res.ok) return housesCache.map || new Map();
     const { data } = await res.json();
     const map = new Map();
     for (const row of data || []) {
-      map.set(row.house, { twoNGroupId: row.two_n_group_id || null });
+      map.set(row.house, { twoNGroupId: row.two_n_group_id || null, propertyName: row.domain || row.location || row.house });
     }
     housesCache = { map, fetchedAt: now };
     return map;
@@ -517,7 +517,8 @@ export default async function handler(req, res) {
         const { subject, html } = renderTemplate(template, {
           guestName: g.guestName,
           guestEmail: normalizedEmail,
-          houseName: house,
+          houseName: houseData?.propertyName || house,
+          propertyName: houseData?.propertyName || house,
           house,
           startDate, endDate,
           doorCode: effectiveDoorCode,

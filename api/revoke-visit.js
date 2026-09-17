@@ -26,14 +26,14 @@ async function fetchHousesMap() {
   if (housesCache.map && now - housesCache.fetchedAt < HOUSES_TTL_MS) return housesCache.map;
   try {
     const res = await fetch(
-      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house,two_n_group_id`,
+      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house,two_n_group_id,location,domain`,
       { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
     );
     if (!res.ok) return housesCache.map || new Map();
     const { data } = await res.json();
     const map = new Map();
     for (const row of data || []) {
-      map.set(row.house, { twoNGroupId: row.two_n_group_id || null });
+      map.set(row.house, { twoNGroupId: row.two_n_group_id || null, propertyName: row.domain || row.location || row.house });
     }
     housesCache = { map, fetchedAt: now };
     return map;
