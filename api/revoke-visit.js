@@ -17,10 +17,35 @@ import { deleteVisitor, revokeVisitorAccess } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 
+// Fetch the house → 2N group mapping from Directus (same pattern as create-visit).
+let housesCache = { map: null, fetchedAt: 0 };
+const HOUSES_TTL_MS = 5 * 60 * 1000;
+
+async function fetchHousesMap() {
+  const now = Date.now();
+  if (housesCache.map && now - housesCache.fetchedAt < HOUSES_TTL_MS) return housesCache.map;
+  try {
+    const res = await fetch(
+      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house,two_n_group_id`,
+      { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
+    );
+    if (!res.ok) return housesCache.map || new Map();
+    const { data } = await res.json();
+    const map = new Map();
+    for (const row of data || []) {
+      map.set(row.house, { twoNGroupId: row.two_n_group_id || null });
+    }
+    housesCache = { map, fetchedAt: now };
+    return map;
+  } catch {
+    return housesCache.map || new Map();
+  }
+}
+
 async function revokeOneVisit(id, token, delete2NVisitor = false) {
   // Read the visit row
   const getRes = await fetch(
-    `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_email,status,ac_visitor_id,website_access`,
+    `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_name,guest_email,status,ac_visitor_id,website_access,house,door_code`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!getRes.ok) {
@@ -47,17 +72,41 @@ async function revokeOneVisit(id, token, delete2NVisitor = false) {
     throw new Error(`Directus revoke failed (${patchRes.status}): ${body.slice(0, 300)}`);
   }
 
-  // Handle the 2N visitor: delete entirely, or deactivate (set VisitTo to now)
-  // so the PIN stops working but the visitor record remains for future re-extension.
-  // If 2N fails, the visit is still revoked in Directus and Cloudflare, but we
-  // surface the error to the user so they know the door PIN may still be active.
+  // Handle the 2N visitor: delete entirely, or revoke access (delete + recreate
+  // with same PIN but a past time window) so the PIN can't open doors but stays
+  // on file for quick re-extension. If 2N fails, the visit is still revoked in
+  // Directus and Cloudflare, but we surface the error to the user.
   let twoNError = null;
   if (visit.ac_visitor_id) {
     try {
       if (delete2NVisitor) {
         await deleteVisitor(visit.ac_visitor_id);
       } else {
-        await revokeVisitorAccess(visit.ac_visitor_id);
+        // Look up the 2N group for this house
+        const housesMap = await fetchHousesMap();
+        const houseData = housesMap.get(visit.house);
+        const twoNGroupId = houseData?.twoNGroupId || null;
+
+        const result = await revokeVisitorAccess(
+          visit.ac_visitor_id,
+          visit.door_code, // reuse the same PIN
+          visit.guest_name,
+          visit.guest_email,
+          twoNGroupId,
+          null // group name not critical for recreate
+        );
+
+        // Update the gd_visits row with the new 2N visitor ID
+        if (result?.visitorId) {
+          await fetch(`${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ ac_visitor_id: result.visitorId }),
+          });
+        }
       }
     } catch (err) {
       console.error("2N visitor handling failed:", err);
