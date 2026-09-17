@@ -137,6 +137,17 @@ function VisitForm({ session, houses, onCreated }) {
   const [doorCode, setDoorCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [templates, setTemplates] = useState([]);
+
+  // Fetch email templates on mount
+  useEffect(() => {
+    fetch("/api/email-templates", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.templates) setTemplates(data.templates); })
+      .catch(() => {});
+  }, [session]);
 
   // Existing-visitor lookup state (Phase 2) — applies to the first guest only
   const [existingVisitors, setExistingVisitors] = useState(null);
