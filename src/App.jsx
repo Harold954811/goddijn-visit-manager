@@ -73,7 +73,7 @@ function SignIn() {
 }
 
 function Dashboard({ session, houses }) {
-  const [tab, setTab] = useState("visits"); // "visits" | "new" | "creds"
+  const [tab, setTab] = useState("new"); // "visits" | "new" | "creds"
   const [refreshKey, setRefreshKey] = useState(0);
 
   const creatorName =
@@ -102,13 +102,13 @@ function Dashboard({ session, houses }) {
         </div>
 
         <div className="tab-row">
-          <button className={tab === "visits" ? "tab active" : "tab"} onClick={() => setTab("visits")}>
+          <button className={`tab tab-visits ${tab === "visits" ? "active" : ""}`} onClick={() => setTab("visits")}>
             Who's staying where
           </button>
-          <button className={tab === "new" ? "tab active" : "tab"} onClick={() => setTab("new")}>
+          <button className={`tab ${tab === "new" ? "active" : ""}`} onClick={() => setTab("new")}>
             New visit
           </button>
-          <button className={tab === "creds" ? "tab active" : "tab"} onClick={() => setTab("creds")}>
+          <button className={`tab tab-creds ${tab === "creds" ? "active" : ""}`} onClick={() => setTab("creds")}>
             Credentials
           </button>
         </div>

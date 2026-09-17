@@ -474,6 +474,7 @@ form { padding-bottom: 70px; }
   h1 { font-size: 1.05rem; }
   .tab-row { gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
   .tab { padding: 6px 10px; font-size: 0.78rem; }
+  .tab-visits, .tab-creds { display: none; }
   form input, form select, form textarea { padding: 8px 10px; font-size: 0.95rem; margin-top: 3px; }
   form label { margin-bottom: 8px; font-size: 0.8rem; }
   /* Date pickers side by side even on mobile */
