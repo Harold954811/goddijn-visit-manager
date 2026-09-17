@@ -628,7 +628,7 @@ function RevokeModal({ visit, revokeAll, houses, onConfirm, onCancel }) {
                 className="revoke-option"
                 onClick={() => onConfirm(false)}
               >
-                <strong>Revoke access, keep PIN</strong>
+                <strong>Revoke Access, keep visitor</strong>
                 <span className="muted small">Visiting window ends now — PIN can't open doors. Visitor and PIN stay in 2N for quick re-extension next time.</span>
               </button>
               <button
