@@ -369,8 +369,11 @@ button.link {
 .visit-type-card:hover { border-color: #4a5568; }
 .visit-type-card.selected {
   border-color: #3b82f6;
-  background: rgba(59,130,246,0.08);
+  background: #3b82f6;
+  color: white;
 }
+.visit-type-card.selected .visit-type-card-title { color: white; }
+.visit-type-card.selected .visit-type-card-desc { color: rgba(255,255,255,0.85); }
 .visit-type-card-title {
   font-size: 0.95rem;
   font-weight: 600;
