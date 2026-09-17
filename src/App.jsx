@@ -482,10 +482,16 @@ function VisitsList({ session, houses, refreshKey }) {
 
   async function handleRevoke(visit, revokeAll = false) {
     const houseName = houses.find((h) => h.matchHouse === visit.house)?.name || visit.house;
-    const msg = revokeAll
-      ? `Revoke access for ALL guests in this family visit to ${houseName}?`
-      : `Revoke ${visit.guest_name}'s access to ${houseName}?`;
-    if (!window.confirm(msg)) return;
+    const who = revokeAll
+      ? `ALL guests in this family visit to ${houseName}`
+      : `${visit.guest_name}'s access to ${houseName}`;
+    const deleteDoor = window.confirm(
+      `Revoke ${who}?\n\nClick OK to also DELETE the 2N door visitor (PIN stops working).\nClick Cancel to keep the door PIN valid for a future visit.`
+    );
+    const proceed = window.confirm(
+      `Confirm: revoke ${who}${deleteDoor ? " and delete door access" : " (keep door PIN)"}?`
+    );
+    if (!proceed) return;
     try {
       const res = await fetch("/api/revoke-visit", {
         method: "POST",
@@ -493,7 +499,11 @@ function VisitsList({ session, houses, refreshKey }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify(revokeAll ? { visitGroupId: visit.visit_group_id } : { id: visit.id }),
+        body: JSON.stringify(
+          revokeAll
+            ? { visitGroupId: visit.visit_group_id, deleteVisitor: deleteDoor }
+            : { id: visit.id, deleteVisitor: deleteDoor }
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);

@@ -17,7 +17,7 @@ import { deleteVisitor } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
 
-async function revokeOneVisit(id, token) {
+async function revokeOneVisit(id, token, delete2NVisitor = false) {
   // Read the visit row
   const getRes = await fetch(
     `${DIRECTUS}/items/gd_visits/${encodeURIComponent(id)}?fields=id,guest_email,status,ac_visitor_id,website_access`,
@@ -47,8 +47,8 @@ async function revokeOneVisit(id, token) {
     throw new Error(`Directus revoke failed (${patchRes.status}): ${body.slice(0, 300)}`);
   }
 
-  // Delete the 2N visitor if one was provisioned (non-fatal)
-  if (visit.ac_visitor_id) {
+  // Delete the 2N visitor if requested and one was provisioned (non-fatal)
+  if (delete2NVisitor && visit.ac_visitor_id) {
     try {
       await deleteVisitor(visit.ac_visitor_id);
     } catch (err) {
@@ -93,7 +93,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { id, visitGroupId } = req.body || {};
+  const { id, visitGroupId, deleteVisitor: delete2N } = req.body || {};
   const token = process.env.DIRECTUS_VISIT_MANAGER_TOKEN;
 
   try {
@@ -112,11 +112,11 @@ export default async function handler(req, res) {
       const toRevoke = (groupVisits || []).filter((v) => v.status !== "Revoked");
 
       for (const v of toRevoke) {
-        await revokeOneVisit(v.id, token);
+        await revokeOneVisit(v.id, token, !!delete2N);
       }
       res.status(200).json({ ok: true, revoked: toRevoke.length });
     } else if (id !== undefined && id !== null && id !== "") {
-      const visit = await revokeOneVisit(id, token);
+      const visit = await revokeOneVisit(id, token, !!delete2N);
       if (!visit) {
         res.status(404).json({ error: "Visit not found" });
         return;
