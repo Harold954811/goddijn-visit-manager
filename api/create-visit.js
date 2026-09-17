@@ -27,7 +27,6 @@
 //   CLOUDFLARE_ACCESS_TOKEN           -- Access: Apps and Policies edit, scoped to one account
 //   RESEND_API_KEY                    -- sending access on the goddijn.net domain
 
-import { houseOptions } from "../src/houses.js";
 import { createVisitor } from "../lib/2n.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
@@ -83,7 +82,36 @@ async function isAuthorizedCreator(email) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const VALID_HOUSES = new Set(houseOptions().map((h) => h.matchHouse));
+
+// Fetch the valid houses and their 2N group mappings from Directus.
+// Replaces the old static VALID_HOUSES set from src/houses.js — the
+// server now validates the house name and looks up the 2N group ID
+// from the source of truth, not from a client-supplied value.
+let housesCache = { map: null, fetchedAt: 0 };
+const HOUSES_TTL_MS = 5 * 60 * 1000;
+
+async function fetchHousesMap() {
+  const now = Date.now();
+  if (housesCache.map && now - housesCache.fetchedAt < HOUSES_TTL_MS) {
+    return housesCache.map;
+  }
+  try {
+    const res = await fetch(
+      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house,two_n_group_id&sort=sort`,
+      { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
+    );
+    if (!res.ok) return housesCache.map || new Map();
+    const { data } = await res.json();
+    const map = new Map();
+    for (const row of data || []) {
+      map.set(row.house, { twoNGroupId: row.two_n_group_id || null });
+    }
+    housesCache = { map, fetchedAt: now };
+    return map;
+  } catch {
+    return housesCache.map || new Map();
+  }
+}
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -91,16 +119,19 @@ function escapeHtml(str) {
   })[c]);
 }
 
-function validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }) {
+async function validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode }) {
+  const housesMap = await fetchHousesMap();
+  if (!house || !housesMap.has(house)) {
+    return "House is missing or not one of the known houses";
+  }
   if (!guestName || typeof guestName !== "string" || guestName.length > 200) {
     return "Guest name is required (max 200 characters)";
   }
   if (!guestEmail || typeof guestEmail !== "string" || !EMAIL_RE.test(guestEmail.trim())) {
     return "Guest email is missing or not a valid email address";
   }
-  if (!house || !VALID_HOUSES.has(house)) {
-    return "House is missing or not one of the known houses";
-  }
+  // House validation now happens against the Directus gd_houses table,
+  // fetched dynamically. The 2N group ID is also looked up from there.
   if (!DATE_RE.test(startDate || "") || !DATE_RE.test(endDate || "")) {
     return "Arrival and departure dates must be in YYYY-MM-DD form";
   }
@@ -260,9 +291,9 @@ async function sendInvitationEmail({ creator, guestName, guestEmail, houseName, 
 // a manual door code, skip this -- he may have a specific code in mind.
 // If the house has no 2N devices (e.g. Rome), skip silently.
 // Returns { visitorId, pin } or null.
-async function provisionDoorCode({ guestName, guestEmail, house, startDate, endDate, doorCode }) {
+async function provisionDoorCode({ guestName, guestEmail, startDate, endDate, doorCode, twoNGroupId }) {
   if (doorCode) return null;
-  return createVisitor({ guestName, guestEmail, house, startDate, endDate });
+  return createVisitor({ guestName, guestEmail, startDate, endDate, twoNGroupId });
 }
 
 export default async function handler(req, res) {
@@ -282,12 +313,17 @@ export default async function handler(req, res) {
   }
 
   const { guestName, guestEmail, house, startDate, endDate, notes, doorCode } = req.body || {};
-  const validationError = validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode });
+  const validationError = await validateVisitInput({ guestName, guestEmail, house, startDate, endDate, notes, doorCode });
   if (validationError) {
     res.status(400).json({ error: validationError });
     return;
   }
   const normalizedGuestEmail = guestEmail.trim().toLowerCase();
+
+  // Look up the 2N group ID for this house from the Directus houses map.
+  const housesMap = await fetchHousesMap();
+  const houseData = housesMap.get(house);
+  const twoNGroupId = houseData?.twoNGroupId || null;
 
   try {
     const visit = await createDirectusVisit({
@@ -301,7 +337,7 @@ export default async function handler(req, res) {
     let effectiveDoorCode = doorCode;
     try {
       const result = await provisionDoorCode({
-        guestName, guestEmail: normalizedGuestEmail, house, startDate, endDate, doorCode,
+        guestName, guestEmail: normalizedGuestEmail, startDate, endDate, doorCode, twoNGroupId,
       });
       if (result) {
         effectiveDoorCode = result.pin;

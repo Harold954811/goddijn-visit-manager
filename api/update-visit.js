@@ -9,13 +9,35 @@
 
 import { verifyCaller, isAuthorizedCreator } from "../lib/auth.js";
 import { addToCloudflareAllowlist } from "../lib/cloudflare.js";
-import { houseOptions } from "../src/houses.js";
 
 const DIRECTUS = "https://cms.goddijn.net";
-const VALID_HOUSES = new Set(houseOptions().map((h) => h.matchHouse));
 const VALID_STATUSES = new Set(["Draft", "Sent", "Active", "Expired", "Revoked"]);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Fetch valid house names from Directus (same pattern as create-visit.js).
+let housesCache = { names: null, fetchedAt: 0 };
+const HOUSES_TTL_MS = 5 * 60 * 1000;
+
+async function fetchValidHouseNames() {
+  const now = Date.now();
+  if (housesCache.names && now - housesCache.fetchedAt < HOUSES_TTL_MS) {
+    return housesCache.names;
+  }
+  try {
+    const res = await fetch(
+      `${DIRECTUS}/items/gd_houses?limit=-1&fields=house&sort=sort`,
+      { headers: { Authorization: `Bearer ${process.env.DIRECTUS_VISIT_MANAGER_TOKEN}` } }
+    );
+    if (!res.ok) return housesCache.names || new Set();
+    const { data } = await res.json();
+    const names = new Set((data || []).map((r) => r.house));
+    housesCache = { names, fetchedAt: now };
+    return names;
+  } catch {
+    return housesCache.names || new Set();
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== "PATCH") {
@@ -60,7 +82,8 @@ export default async function handler(req, res) {
   }
 
   if (house !== undefined) {
-    if (!house || !VALID_HOUSES.has(house)) {
+    const validHouses = await fetchValidHouseNames();
+    if (!house || !validHouses.has(house)) {
       res.status(400).json({ error: "House is missing or not one of the known houses" });
       return;
     }

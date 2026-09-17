@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
-import { houseOptions } from "./houses";
+import { houseOptions as staticHouseOptions } from "./houses";
 
-const HOUSES = houseOptions();
-const HOUSE_NAME_BY_MATCH = Object.fromEntries(HOUSES.map((h) => [h.matchHouse, h.name]));
+const STATIC_HOUSES = staticHouseOptions();
 const STATUSES = ["Draft", "Sent", "Active", "Expired", "Revoked"];
 
 function todayISO() {
@@ -17,6 +16,7 @@ function toDateInputValue(isoString) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [houses, setHouses] = useState(STATIC_HOUSES);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -27,9 +27,20 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Fetch houses from the API (Directus-backed) on mount. Falls back to
+  // the static copy in houses.js if the API is unreachable.
+  useEffect(() => {
+    fetch("/api/houses")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.options?.length) setHouses(data.options);
+      })
+      .catch(() => {/* keep static fallback */});
+  }, []);
+
   if (loadingSession) return <Centered>Loading…</Centered>;
   if (!session) return <SignIn />;
-  return <Dashboard session={session} />;
+  return <Dashboard session={session} houses={houses} />;
 }
 
 function Centered({ children }) {
@@ -60,7 +71,7 @@ function SignIn() {
   );
 }
 
-function Dashboard({ session }) {
+function Dashboard({ session, houses }) {
   const [tab, setTab] = useState("visits"); // "visits" | "new"
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -99,19 +110,19 @@ function Dashboard({ session }) {
         </div>
 
         {tab === "new" ? (
-          <VisitForm session={session} onCreated={visitCreated} />
+          <VisitForm session={session} houses={houses} onCreated={visitCreated} />
         ) : (
-          <VisitsList session={session} refreshKey={refreshKey} />
+          <VisitsList session={session} houses={houses} refreshKey={refreshKey} />
         )}
       </div>
     </div>
   );
 }
 
-function VisitForm({ session, onCreated }) {
+function VisitForm({ session, houses, onCreated }) {
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
-  const [house, setHouse] = useState(HOUSES[0]?.matchHouse ?? "");
+  const [house, setHouse] = useState(houses[0]?.matchHouse ?? "");
   const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
@@ -148,7 +159,7 @@ function VisitForm({ session, onCreated }) {
   }
 
   const groupedHouses = [];
-  for (const h of HOUSES) {
+  for (const h of houses) {
     let group = groupedHouses.find((g) => g.label === h.groupLabel);
     if (!group) {
       group = { label: h.groupLabel, houses: [] };
@@ -239,7 +250,7 @@ function VisitForm({ session, onCreated }) {
   );
 }
 
-function VisitsList({ session, refreshKey }) {
+function VisitsList({ session, houses, refreshKey }) {
   const [visits, setVisits] = useState(null);
   const [error, setError] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -265,7 +276,7 @@ function VisitsList({ session, refreshKey }) {
   }, [refreshKey]);
 
   async function handleRevoke(visit) {
-    if (!window.confirm(`Revoke ${visit.guest_name}'s access to ${HOUSE_NAME_BY_MATCH[visit.house] || visit.house}?`)) {
+    if (!window.confirm(`Revoke ${visit.guest_name}'s access to ${houses.find((h) => h.matchHouse === visit.house)?.name || visit.house}?`)) {
       return;
     }
     try {
@@ -325,6 +336,7 @@ function VisitsList({ session, refreshKey }) {
                   key={v.id}
                   visit={v}
                   session={session}
+                  houses={houses}
                   onDone={() => {
                     setEditingId(null);
                     load();
@@ -338,7 +350,7 @@ function VisitsList({ session, refreshKey }) {
                     <div className="muted small">{v.guest_email}</div>
                   </td>
                   <td>
-                    <div>{HOUSE_NAME_BY_MATCH[v.house] || v.house}</div>
+                    <div>{houses.find((h) => h.matchHouse === v.house)?.name || v.house}</div>
                     {v.door_code && <div className="muted small">Door code: {v.door_code}</div>}
                   </td>
                   <td>{toDateInputValue(v.start_date)}</td>
@@ -366,7 +378,7 @@ function VisitsList({ session, refreshKey }) {
   );
 }
 
-function EditRow({ visit, session, onDone, onCancel }) {
+function EditRow({ visit, session, houses, onDone, onCancel }) {
   const [guestName, setGuestName] = useState(visit.guest_name);
   const [guestEmail, setGuestEmail] = useState(visit.guest_email);
   const [house, setHouse] = useState(visit.house);
@@ -422,7 +434,7 @@ function EditRow({ visit, session, onDone, onCancel }) {
           <label>
             House
             <select value={house} onChange={(e) => setHouse(e.target.value)}>
-              {HOUSES.map((h) => (
+              {houses.map((h) => (
                 <option key={h.matchHouse} value={h.matchHouse}>
                   {h.groupLabel} — {h.name}
                 </option>
