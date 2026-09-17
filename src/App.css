@@ -35,16 +35,16 @@ body {
 }
 .tab-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 18px;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 .tab {
-  padding: 8px 16px;
+  padding: 7px 12px;
   border: 1px solid #262b36;
-  border-radius: 999px;
+  border-radius: 8px;
   background: transparent;
   color: #a7adba;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   cursor: pointer;
 }
 .tab.active {
@@ -477,8 +477,8 @@ button.link {
   /* Visit type cards: compact horizontal */
   .visit-type-cards { flex-direction: row; gap: 8px; margin-bottom: 12px; }
   .visit-type-card { padding: 10px 10px; }
-  .visit-type-card-title { font-size: 0.85rem; margin-bottom: 2px; }
-  .visit-type-card-desc { font-size: 0.72rem; line-height: 1.25; }
+  .visit-type-card-title { font-size: 0.85rem; margin-bottom: 0; }
+  .visit-type-card-desc { display: none; }
   /* Guest rows: tighter */
   .guest-row { padding: 6px 0; }
   .guest-row-header { margin-bottom: 2px; }
