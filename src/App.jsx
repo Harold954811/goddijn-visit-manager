@@ -502,8 +502,8 @@ function VisitForm({ session, houses, onCreated }) {
               : visitType === "day"
               ? "Send day visitor invite"
               : guests.length > 1
-              ? `Send house guest invites (${guests.length} guests)`
-              : "Send house guest invite"}
+              ? `Send invites (${guests.length} guests)`
+              : "Send invite"}
           </button>
         </div>
       </form>
