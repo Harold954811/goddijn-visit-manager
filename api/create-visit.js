@@ -186,7 +186,7 @@ async function verifyCaller(authHeader) {
   };
 }
 
-async function createDirectusVisit({ guestName, guestEmail, house, startDate, endDate, notes, doorCode, visitGroupId, websiteAccess }) {
+async function createDirectusVisit({ guestName, guestEmail, house, startDate, endDate, notes, doorCode, visitGroupId, websiteAccess, visitType }) {
   const res = await fetch(`${DIRECTUS}/items/gd_visits`, {
     method: "POST",
     headers: {
@@ -449,6 +449,7 @@ export default async function handler(req, res) {
         house, startDate, endDate, notes, doorCode,
         visitGroupId,
         websiteAccess: giveWebsiteAccess,
+        visitType,
       });
 
       if (giveWebsiteAccess) {
